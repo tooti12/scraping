@@ -1,0 +1,7 @@
+__pycache__/
+.vscode/
+.github/workflows/.yaml
+venv/
+.venv/
+env/
+.env/
