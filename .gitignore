@@ -5,3 +5,7 @@ venv/
 .venv/
 env/
 .env/
+downloaded_files/*
+.DS_Store
+*.ipynb
+scraping.ipynb
