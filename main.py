@@ -22,14 +22,31 @@ class VfsScraper:
             self.auth_token = AuthHandler(self.country, self.email, self.password,browser).authenticate()
             if self.auth_token is None:
                 print("Auth token is none. Exiting.")
-            return
-        with BrowserClient(self.country,proxy=False,uc=False,headless=True) as browser:
-            api_client = APIClient(self.auth_token,self.config,self.email,browser)
+                return
+            browser.sb.driver.uc_click("button.mat-btn-lg")
+            browser.sb.sleep(5)
             while True:
                 try:
-                    response = api_client.check_slot_availability()
-                    print("Response:", response)
-                    time.sleep(280)
+                    
+                    browser.sb.click("#mat-select-0",scroll=True)
+                    browser.sb.sleep(2)
+                    browser.sb.cdp.gui_click_element("#NAKH")
+                    browser.sb.sleep(5)
+                    browser.sb.cdp.gui_click_element("#mat-select-0")
+                    browser.sb.sleep(5)
+                    browser.sb.cdp.gui_click_element("#NAKN")
+                    browser.sb.sleep(5)
+                    browser.sb.click("#mat-select-2", scroll=True)
+                    browser.sb.sleep(5)
+                    browser.sb.cdp.gui_click_element("#TA")
+                    try:
+                        alert_text = browser.sb.get_text("div.alert-info")
+                        print("Alert text:", alert_text)
+                        if "no appointment slots" in alert_text.lower():
+                            print("Slots are not available.")
+                    except Exception as e:
+                        print("No alert found or error occurred:", e)
+                    time.sleep(220)
                 except Exception as e:
                     print(f"Monitoring error: {e}")
                     browser.sb.sleep(60)
@@ -43,5 +60,5 @@ class VfsScraper:
         self.notifier.send_sms(f"VFS Appointments {message} available")
 
 if __name__ == "__main__":
-    scraper = VfsScraper("nld", "umar.javed@thesemantics.co", "P@ssword123")
+    scraper = VfsScraper("nld", "vfs@thesemantics.co", "P@ssword123")
     scraper.start_monitoring()

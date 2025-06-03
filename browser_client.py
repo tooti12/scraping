@@ -5,12 +5,12 @@ from seleniumbase import SB
 
 class BrowserClient:
     def __init__(self, country, proxy=True, uc=True, headless=False):
-        soax_proxy = "package-282130-sessionid-7mYcBNNXpJOr6TP6-sessionlength-60-bindttl-60-opt-wb:M5QKXRF1mQoB7edV@proxy.soax.com:5000"
+        soax_proxy = "package-282130-country-gb-sessionid-mzamPAt0wivcgPkn-sessionlength-150-opt-wb:M5QKXRF1mQoB7edV@proxy.soax.com:5000"
         self.country = country
         self.sb = None
         browser_params = {
             "uc": uc,
-            "headless": headless,
+            "headless2": headless,
             "incognito": True,
             "proxy": soax_proxy if proxy else None,
         }
@@ -47,26 +47,21 @@ class BrowserClient:
 
     def check_is_ip_blocked(self):
         try:
+            # Check for informational alert indicating IP block
             alert_selector = 'div[role="alert"].alert-info'
-            # Try to wait for alert for up to 5 seconds
-            self.sb.wait_for_element(alert_selector, timeout=5)
-            alert_text = self.sb.get_text(alert_selector)
-            print("ALERT TEXT:", alert_text)
+            self.sb.wait_for_element(alert_selector, timeout=10)
+            print("IP block alert appeared.")
             return True
-
         except Exception:
-            print("No alert appeared within the timeout.")
-            return False
+            print("No IP block alert appeared within the timeout.")
 
-    def check_is_account_blocked(self):
         try:
-            alert_selector = "div.alert.alert-info"
-            self.sb.wait_for_element(alert_selector, timeout=5)
-            alert_text = self.sb.get_text(alert_selector)
-            print("ALERT TEXT:", alert_text)
+            # Fallback check for error message in page heading
+            self.sb.assert_text("Sorry, we’ve been unable to progress", "h1",timeout=4)
+            print("IP block detected via heading text.")
             return True
         except Exception as e:
-            print("No alert appeared or error occurred:", e)
+            print("No IP block detected via heading text:", e)
             return False
 
     def get_auth_token(self):

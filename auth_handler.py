@@ -14,7 +14,7 @@ class AuthHandler:
             if not self.browser.check_is_ip_blocked():
                 self.browser.handle_cookies()
                 self._enter_credentials()
-                if not  self.browser.check_is_account_blocked():
+                if not  self.browser.check_is_ip_blocked():
                     self._submit_otp()
 
                     try:
@@ -26,6 +26,7 @@ class AuthHandler:
                         self.browser.sb.sleep(200)
 
     def _enter_credentials(self):
+        self.browser.solve_captcha()
         self.browser.sb.cdp.press_keys("#email", self.email)
         self.browser.sb.cdp.press_keys("#password", self.password)
         self.browser.sb.wait_for_element("button.mat-btn-lg", timeout=50)
@@ -47,7 +48,7 @@ class AuthHandler:
 
     def _submit_otp(self):
         from notification_handler import EmailClient
-        self.browser.sb.cdp.gui_click_element("#mat-input-5")
+        self.browser.sb.wait_for_element("#mat-input-5", timeout=50)
         self.browser.sb.sleep(40)
         otp = EmailClient().get_otp()
         self.browser.solve_captcha()

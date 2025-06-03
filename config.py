@@ -23,7 +23,7 @@ TWILIO_CONFIG = {
 }
 
 EMAIL_CONFIG = {
-    "username": "umar.javed@thesemantics.co",
+    "username": "vfs@thesemantics.co",
     "password": "J]r0]a+C.t*g",
     "imap_server": "thesemantics.co",
 }
@@ -31,4 +31,4 @@ EMAIL_CONFIG = {
 #     "username": "umarjaved56@gmail.com",
 #     "password": "dgbjzgzpmfbrhmda",
 #     "imap_server": "imap.gmail.com"
-# },
+# }
