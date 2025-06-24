@@ -28,7 +28,4 @@ EMAIL_CONFIG = {
     "imap_server": "thesemantics.co",
 }
 
-#     "username": "umarjaved56@gmail.com",
-#     "password": "dgbjzgzpmfbrhmda",
-#     "imap_server": "imap.gmail.com"
-# }
+

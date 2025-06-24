@@ -27,10 +27,6 @@ class BrowserClient:
         self.sb.activate_cdp_mode(
             f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
         )
-        # self.sb.uc_open_with_reconnect(
-        #     f"https://visa.vfsglobal.com/gbr/en/{self.country}/login",
-        #     reconnect_time=3.7
-        # )
 
     def handle_cookies(self):
         try:

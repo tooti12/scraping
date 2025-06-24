@@ -18,11 +18,12 @@ class VfsScraper:
         self.auth_token = None
 
     def start_monitoring(self):
-        with BrowserClient(self.country) as browser:
+        with BrowserClient(self.country,proxy=False) as browser:
             self.auth_token = AuthHandler(self.country, self.email, self.password,browser).authenticate()
             if self.auth_token is None:
                 print("Auth token is none. Exiting.")
                 return
+            browser.sb.sleep(5)
             browser.sb.driver.uc_click("button.mat-btn-lg")
             browser.sb.sleep(5)
             while True:
@@ -44,8 +45,11 @@ class VfsScraper:
                         print("Alert text:", alert_text)
                         if "no appointment slots" in alert_text.lower():
                             print("Slots are not available.")
+                        else:
+                            self._handle_available_slot("Amsterdam", "2024-01-01")
                     except Exception as e:
                         print("No alert found or error occurred:", e)
+                        break
                     time.sleep(220)
                 except Exception as e:
                     print(f"Monitoring error: {e}")
