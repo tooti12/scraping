@@ -48,13 +48,13 @@ class AuthHandler:
 
     def _submit_otp(self):
         from notification_handler import EmailClient
-        self.browser.sb.wait_for_element("#mat-input-5", timeout=50)
+        self.browser.sb.wait_for_element("#mat-input-3", timeout=50)
         self.browser.sb.sleep(40)
         otp = EmailClient().get_otp()
         self.browser.solve_captcha()
         print("OTP received:", otp)
         if otp is not None:
-            self.browser.sb.cdp.press_keys("#mat-input-5", str(otp))
+            self.browser.sb.cdp.press_keys("#mat-input-3", str(otp))
             # self._enter_virtual_keyboard(str(otp))
             self.browser.sb.driver.uc_click("button.mat-btn-lg")
             self.browser.sb.sleep(10)

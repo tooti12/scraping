@@ -28,32 +28,20 @@ class VfsScraper:
             browser.sb.sleep(5)
             while True:
                 try:
-                    
-                    browser.sb.click("#mat-select-0",scroll=True)
-                    browser.sb.sleep(2)
-                    browser.sb.cdp.gui_click_element("#NAKH")
-                    browser.sb.sleep(5)
-                    browser.sb.cdp.gui_click_element("#mat-select-0")
-                    browser.sb.sleep(5)
-                    browser.sb.cdp.gui_click_element("#NAKN")
-                    browser.sb.sleep(5)
-                    browser.sb.click("#mat-select-2", scroll=True)
-                    browser.sb.sleep(5)
-                    browser.sb.cdp.gui_click_element("#TA")
-                    try:
-                        alert_text = browser.sb.get_text("div.alert-info")
-                        print("Alert text:", alert_text)
-                        if "no appointment slots" in alert_text.lower():
-                            print("Slots are not available.")
+                    response = browser.call_check_slot(jwt_token=self.auth_token,login_user=self.email)
+                    print(response)
+                    if response['status']==200:
+                        if slots:=(response['body']["earliestSlotLists"]):
+                            self._handle_available_slot("Amsterdam", str(slots))
                         else:
-                            self._handle_available_slot("Amsterdam", "2024-01-01")
-                    except Exception as e:
-                        print("No alert found or error occurred:", e)
-                        break
-                    time.sleep(220)
+                            time.sleep(220)
+                    else:
+                        browser.switch_tabs()
+                   
+                   
                 except Exception as e:
                     print(f"Monitoring error: {e}")
-                    browser.sb.sleep(60)
+                    browser.sb.sleep(200)
                     return
 
 
@@ -66,3 +54,8 @@ class VfsScraper:
 if __name__ == "__main__":
     scraper = VfsScraper("nld", "vfs@thesemantics.co", "P@ssword123")
     scraper.start_monitoring()
+
+
+
+
+

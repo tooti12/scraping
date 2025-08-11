@@ -1,7 +1,7 @@
-# browser_client.py
+# self_client.py
 from selenium.common.exceptions import TimeoutException
 from seleniumbase import SB
-
+import json
 
 class BrowserClient:
     def __init__(self, country, proxy=True, uc=True, headless=False):
@@ -37,10 +37,14 @@ class BrowserClient:
             return
 
     def solve_captcha(self):
-        print(self.sb.uc_gui_click_captcha())
+        try:
+            self.sb.uc_gui_click_captcha()
+            self.sb.driver.uc_click("button.mat-btn-lg")
+        except:
+            print("Could not solve catpcha")
+            pass
 
-        # self.sb.assert_element("svg#success-i", timeout=5)
-
+     
     def check_is_ip_blocked(self):
         try:
             # Check for informational alert indicating IP block
@@ -66,3 +70,63 @@ class BrowserClient:
         return sessionStorage.getItem('JWT');
         """
         )
+
+    def switch_tabs(self):
+        self.sb.click("#mat-select-0",scroll=True)
+        self.sb.sleep(2)
+        self.sb.cdp.gui_click_element("#LON")
+        self.sb.sleep(5)
+        self.sb.cdp.gui_click_element("#mat-select-0")
+        self.sb.sleep(5)
+        self.sb.cdp.gui_click_element("#EDI")
+        self.sb.sleep(5)
+        self.sb.click("#mat-select-1", scroll=True)
+        self.sb.sleep(5)
+        self.sb.cdp.gui_click_element("#BV")
+        self.solve_captcha()
+    def call_check_slot(self, login_user: str, jwt_token: str):
+        js_code = f"""
+        const done = arguments[0];
+
+        const url = 'https://lift-api.vfsglobal.com/appointment/CheckIsSlotAvailable';
+        const headers = {{
+          'accept': 'application/json, text/plain, */*',
+          'content-type': 'application/json;charset=UTF-8',
+          'authorize': {json.dumps(jwt_token)},
+          'route': 'gbr/en/nld'
+        }};
+        const body = {{
+          countryCode: 'gbr',
+          missionCode: 'nld',
+          vacCode: 'LON',
+          visaCategoryCode: 'TA',
+          roleName: 'Individual',
+          loginUser: {json.dumps(login_user)},
+          payCode: ''
+        }};
+
+        fetch(url, {{
+          method: 'POST',
+          headers,
+          credentials: 'include',
+          body: JSON.stringify(body)
+        }})
+        .then(async r => {{
+          const text = await r.text();
+          done(JSON.stringify({{
+            status: r.status,
+            statusText: r.statusText,
+            cfRay: r.headers.get('cf-ray'),
+            body: text
+          }}));
+        }})
+        .catch(e => done(JSON.stringify({{ error: e && e.message ? e.message : String(e) }})));
+        """
+
+        raw = self.sb.execute_async_script(js_code)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        try:
+            result["body"] = json.loads(result["body"])
+        except (ValueError, TypeError):
+            pass  # leave it as-is if it's not JSON
+        return result
