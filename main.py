@@ -29,19 +29,16 @@ class VfsScraper:
             while True:
                 try:
                     response = browser.call_check_slot(jwt_token=self.auth_token,login_user=self.email)
-                    print(response)
                     if response['status']==200:
+                        print(response)
                         if slots:=(response['body']["earliestSlotLists"]):
                             self._handle_available_slot("Amsterdam", str(slots))
                         else:
                             time.sleep(220)
                     else:
                         browser.switch_tabs()
-                   
-                   
                 except Exception as e:
                     print(f"Monitoring error: {e}")
-                    browser.sb.sleep(200)
                     return
 
 

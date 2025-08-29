@@ -39,7 +39,7 @@ class BrowserClient:
     def solve_captcha(self):
         try:
             self.sb.uc_gui_click_captcha()
-            self.sb.driver.uc_click("button.mat-btn-lg")
+            # self.sb.driver.uc_click("button.mat-btn-lg")
         except:
             print("Could not solve catpcha")
             pass
@@ -74,15 +74,15 @@ class BrowserClient:
     def switch_tabs(self):
         self.sb.click("#mat-select-0",scroll=True)
         self.sb.sleep(2)
-        self.sb.cdp.gui_click_element("#LON")
+        self.sb.cdp.gui_click_element("#NAKN")
         self.sb.sleep(5)
-        self.sb.cdp.gui_click_element("#mat-select-0")
+        self.sb.click("#mat-select-0",scroll=True)
         self.sb.sleep(5)
-        self.sb.cdp.gui_click_element("#EDI")
-        self.sb.sleep(5)
+        self.sb.cdp.gui_click_element("#NAKH")
+        self.sb.sleep(3)
         self.sb.click("#mat-select-1", scroll=True)
-        self.sb.sleep(5)
-        self.sb.cdp.gui_click_element("#BV")
+        self.sb.sleep(3)
+        self.sb.cdp.gui_click_element("#TA")
         self.solve_captcha()
     def call_check_slot(self, login_user: str, jwt_token: str):
         js_code = f"""
@@ -98,13 +98,12 @@ class BrowserClient:
         const body = {{
           countryCode: 'gbr',
           missionCode: 'nld',
-          vacCode: 'LON',
+          vacCode: 'NAKN',
           visaCategoryCode: 'TA',
           roleName: 'Individual',
           loginUser: {json.dumps(login_user)},
           payCode: ''
         }};
-
         fetch(url, {{
           method: 'POST',
           headers,
@@ -130,3 +129,123 @@ class BrowserClient:
         except (ValueError, TypeError):
             pass  # leave it as-is if it's not JSON
         return result
+    
+    def call_add_applicant(self, login_user: str, jwt_token: str):
+        js_code = f"""
+        const done = arguments[0];
+
+        const url = 'https://lift-api.vfsglobal.com/appointment/applicants';
+        const headers = {{
+        'accept': 'application/json, text/plain, */*',
+        'content-type': 'application/json;charset=UTF-8',
+        'authorize': {json.dumps(jwt_token)},
+        'route': 'gbr/en/nld'
+        }};
+        const body = {{
+        countryCode: 'gbr',
+        missionCode: 'nld',
+        centerCode: 'NAKH',
+        loginUser: {json.dumps(login_user)},
+        visaCategoryCode: 'TA',
+        isEdit: false,
+        feeEntryTypeCode: null,
+        feeExemptionTypeCode: null,
+        feeExemptionDetailsCode: null,
+        applicantList: [
+            {{
+            urn: '',
+            arn: '',
+            loginUser: {json.dumps(login_user)},
+            firstName: 'AHMAR',
+            employerFirstName: '',
+            middleName: '',
+            lastName: 'ALI',
+            employerLastName: '',
+            salutation: '',
+            gender: 1,
+            nationalId: null,
+            VisaToken: null,
+            employerContactNumber: '',
+            contactNumber: '07724267222',
+            dialCode: '44',
+            employerDialCode: '',
+            passportNumber: 'AX7653221',
+            confirmPassportNumber: null,
+            passportExpirtyDate: '05/08/2033',
+            dateOfBirth: '27/08/2025',
+            emailId: 'UMAR@GMAIL.COM',
+            employerEmailId: '',
+            nationalityCode: 'PAK',
+            state: 'HERTS',
+            city: 'WGC',
+            isEndorsedChild: false,
+            applicantType: 0,
+            addressline1: '31',
+            addressline2: '31',
+            pincode: null,
+            referenceNumber: null,
+            vlnNumber: null,
+            applicantGroupId: 0,
+            parentPassportNumber: '',
+            parentPassportExpiry: '',
+            dateOfDeparture: null,
+            entryType: '',
+            eoiVisaType: '',
+            passportType: '',
+            vfsReferenceNumber: '',
+            familyReunificationCerificateNumber: '',
+            PVRequestRefNumber: '',
+            PVStatus: '',
+            PVStatusDescription: '',
+            PVCanAllowRetry: true,
+            PVisVerified: false,
+            eefRegistrationNumber: '',
+            isAutoRefresh: true,
+            helloVerifyNumber: '',
+            OfflineCClink: '',
+            idenfystatuscheck: false,
+            vafStatus: null,
+            SpecialAssistance: '',
+            AdditionalRefNo: null,
+            juridictionCode: '',
+            canInitiateVAF: false,
+            canEditVAF: false,
+            canDeleteVAF: false,
+            canDownloadVAF: false,
+            Retryleft: '',
+            ipAddress: '83.106.89.122'
+            }}
+        ],
+        languageCode: 'en-US',
+        isWaitlist: true,
+        juridictionCode: null,
+        regionCode: null
+        }};
+        fetch(url, {{
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify(body)
+        }})
+        .then(async r => {{
+        const text = await r.text();
+        done(JSON.stringify({{
+            status: r.status,
+            statusText: r.statusText,
+            cfRay: r.headers.get('cf-ray'),
+            body: text
+        }}));
+        }})
+        .catch(e => done(JSON.stringify({{ error: e && e.message ? e.message : String(e) }})));
+        """
+
+        raw = self.sb.execute_async_script(js_code)
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        try:
+            result["body"] = json.loads(result["body"])
+        except (ValueError, TypeError):
+            pass  # leave it as-is if it's not JSON
+        return result
+
+
+    
