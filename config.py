@@ -23,7 +23,6 @@ TWILIO_CONFIG = {
 }
 
 EMAIL_CONFIG = {
-    "username": "vfs@thesemantics.co",
     "password": "J]r0]a+C.t*g",
     "imap_server": "thesemantics.co",
 }

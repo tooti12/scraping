@@ -15,8 +15,7 @@ class AuthHandler:
                 self.browser.handle_cookies()
                 self._enter_credentials()
                 if not  self.browser.check_is_ip_blocked():
-                    self._submit_otp()
-
+                    self._submit_otp(email=self.email)
                     try:
                         self.browser.sb.sleep(3)
                         auth_token = self.browser.get_auth_token()
@@ -46,11 +45,11 @@ class AuthHandler:
         # Implement logic to convert text to virtual keyboard sequence
         pass
 
-    def _submit_otp(self):
+    def _submit_otp(self,email):
         from notification_handler import EmailClient
         self.browser.sb.wait_for_element("#mat-input-3", timeout=50)
         self.browser.sb.sleep(40)
-        otp = EmailClient().get_otp()
+        otp = EmailClient().get_otp(email=email)
         self.browser.solve_captcha()
         print("OTP received:", otp)
         if otp is not None:

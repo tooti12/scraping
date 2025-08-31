@@ -26,10 +26,10 @@ class SMSNotifier:
 
 
 class EmailClient:
-    def get_otp(self):
+    def get_otp(self,email):
         try:
             with imaplib.IMAP4_SSL(EMAIL_CONFIG["imap_server"]) as mail:
-                mail.login(EMAIL_CONFIG["username"], EMAIL_CONFIG["password"])
+                mail.login(email, EMAIL_CONFIG["password"])
                 mail.select("inbox")
                 status, messages = mail.search(None, 'SUBJECT "One Time Password"')
 
