@@ -39,6 +39,7 @@ class BrowserClient:
     def solve_captcha(self):
         try:
             self.sb.uc_gui_click_captcha()
+            self.click('button:contains("Submit")')
             # self.sb.driver.uc_click("button.mat-btn-lg")
         except:
             print("Could not solve catpcha")
