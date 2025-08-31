@@ -3,6 +3,7 @@ from selenium.common.exceptions import TimeoutException
 from seleniumbase import SB
 import json
 
+
 class BrowserClient:
     def __init__(self, country, proxy=True, uc=True, headless=False):
         soax_proxy = "package-282130-country-gb-sessionid-mzamPAt0wivcgPkn-sessionlength-150-opt-wb:M5QKXRF1mQoB7edV@proxy.soax.com:5000"
@@ -13,6 +14,7 @@ class BrowserClient:
             "headless2": headless,
             "incognito": True,
             "proxy": soax_proxy if proxy else None,
+            "chromium_arg": "--disable-gpu,--disable-software-rasterizer,--disable-dev-shm-usage",
         }
         self._sb_ctx = SB(**browser_params)
 
@@ -44,7 +46,6 @@ class BrowserClient:
             print("Could not solve catpcha")
             pass
 
-     
     def check_is_ip_blocked(self):
         try:
             # Check for informational alert indicating IP block
@@ -57,7 +58,7 @@ class BrowserClient:
 
         try:
             # Fallback check for error message in page heading
-            self.sb.assert_text("Sorry, we’ve been unable to progress", "h1",timeout=4)
+            self.sb.assert_text("Sorry, we’ve been unable to progress", "h1", timeout=4)
             print("IP block detected via heading text.")
             return True
         except Exception as e:
@@ -72,11 +73,11 @@ class BrowserClient:
         )
 
     def switch_tabs(self):
-        self.sb.click("#mat-select-0",scroll=True)
+        self.sb.click("#mat-select-0", scroll=True)
         self.sb.sleep(2)
         self.sb.cdp.gui_click_element("#NAKN")
         self.sb.sleep(5)
-        self.sb.click("#mat-select-0",scroll=True)
+        self.sb.click("#mat-select-0", scroll=True)
         self.sb.sleep(5)
         self.sb.cdp.gui_click_element("#NAKH")
         self.sb.sleep(3)
@@ -84,6 +85,7 @@ class BrowserClient:
         self.sb.sleep(3)
         self.sb.cdp.gui_click_element("#TA")
         self.solve_captcha()
+
     def call_check_slot(self, login_user: str, jwt_token: str):
         js_code = f"""
         const done = arguments[0];
@@ -129,7 +131,7 @@ class BrowserClient:
         except (ValueError, TypeError):
             pass  # leave it as-is if it's not JSON
         return result
-    
+
     def call_add_applicant(self, login_user: str, jwt_token: str):
         js_code = f"""
         const done = arguments[0];
@@ -246,6 +248,3 @@ class BrowserClient:
         except (ValueError, TypeError):
             pass  # leave it as-is if it's not JSON
         return result
-
-
-    
