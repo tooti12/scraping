@@ -34,7 +34,7 @@ class VfsScraper:
             while True:
 
                 if time.time() - self.start_time > self.max_runtime:
-                    print("Reached 30-minute limit. Exiting...")
+                    print("Reached 35-minute limit. Exiting...")
                     return
                 try:
                     response = browser.call_check_slot(
@@ -46,8 +46,10 @@ class VfsScraper:
                             self._handle_available_slot(
                                 "Netherlands", str(slots), waitlist=True
                             )
+                            time.sleep(1800) 
                         if slots := (response["body"]["earliestSlotLists"]):
                             self._handle_available_slot("Amsterdam", str(slots))
+                            time.sleep(1800) # 30 minutes 
                         else:
                             time.sleep(120)
                     else:
@@ -79,4 +81,4 @@ if __name__ == "__main__":
         scraper.start_monitoring()
 
         print(f"=== Finished 30 min session for {email} ===")
-        time.sleep(300)  # short pause before restarting with next account
+        time.sleep(200)  # short pause before restarting with next account

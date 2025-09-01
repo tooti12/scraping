@@ -75,11 +75,11 @@ class BrowserClient:
     def switch_tabs(self):
         self.sb.click("#mat-select-0", scroll=True)
         self.sb.sleep(2)
-        self.sb.cdp.gui_click_element("#NAKN")
+        self.sb.cdp.gui_click_element("#NAKH")
         self.sb.sleep(5)
         self.sb.click("#mat-select-0", scroll=True)
         self.sb.sleep(5)
-        self.sb.cdp.gui_click_element("#NAKH")
+        self.sb.cdp.gui_click_element("#NAKN")
         self.sb.sleep(3)
         self.sb.click("#mat-select-1", scroll=True)
         self.sb.sleep(3)
