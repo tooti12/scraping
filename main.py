@@ -41,15 +41,21 @@ class VfsScraper:
                         jwt_token=self.auth_token, login_user=self.email
                     )
                     if response["status"] == 200:
-                        print(response)
-                        if "waitlist" in response["body"]["error"]["description"]:
-                            self._handle_available_slot(
-                                "Netherlands", str(slots), waitlist=True
-                            )
-                            time.sleep(1800) 
+                        print("successfull")
+                        try:
+                            if (
+                                "waitlist"
+                                in response["body"]["error"]["description"].lower()
+                            ):
+                                self._handle_available_slot(
+                                    "Netherlands", str(slots), waitlist=True
+                                )
+                                time.sleep(1800)
+                        except:
+                            pass
                         if slots := (response["body"]["earliestSlotLists"]):
                             self._handle_available_slot("Amsterdam", str(slots))
-                            time.sleep(1800) # 30 minutes 
+                            time.sleep(1800)  # 30 minutes
                         else:
                             time.sleep(120)
                     else:
@@ -69,9 +75,9 @@ class VfsScraper:
 if __name__ == "__main__":
     # rotate through different accounts
     accounts = [
-        ("nld", "vfs@thesemantics.co", "P@ssword123"),
         ("nld", "vfs2@thesemantics.co", "P@ssword123"),
         ("nld", "vfs3@thesemantics.co", "P@ssword123"),
+        ("nld", "vfs@thesemantics.co", "P@ssword123"),
     ]
 
     for country, email, password in itertools.cycle(accounts):

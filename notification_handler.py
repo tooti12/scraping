@@ -26,7 +26,7 @@ class SMSNotifier:
 
 
 class EmailClient:
-    def get_otp(self,email):
+    def get_otp(self, email):
         try:
             with imaplib.IMAP4_SSL(EMAIL_CONFIG["imap_server"]) as mail:
                 mail.login(email, EMAIL_CONFIG["password"])

@@ -26,5 +26,3 @@ EMAIL_CONFIG = {
     "password": "J]r0]a+C.t*g",
     "imap_server": "thesemantics.co",
 }
-
-
