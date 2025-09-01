@@ -57,7 +57,7 @@ class VfsScraper:
                             self._handle_available_slot("Amsterdam", str(slots))
                             time.sleep(1800)  # 30 minutes
                         else:
-                            time.sleep(120)
+                            time.sleep(150)
                     else:
                         browser.switch_tabs()
                 except Exception as e:
@@ -87,4 +87,4 @@ if __name__ == "__main__":
         scraper.start_monitoring()
 
         print(f"=== Finished 30 min session for {email} ===")
-        time.sleep(200)  # short pause before restarting with next account
+        time.sleep(60)  # short pause before restarting with next account

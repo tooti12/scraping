@@ -48,7 +48,7 @@ class AuthHandler:
     def _submit_otp(self,email):
         from notification_handler import EmailClient
         self.browser.sb.wait_for_element("#mat-input-3", timeout=50)
-        self.browser.sb.sleep(40)
+        self.browser.sb.sleep(20)
         otp = EmailClient().get_otp(email=email)
         self.browser.solve_captcha()
         print("OTP received:", otp)
