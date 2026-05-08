@@ -13,6 +13,12 @@ COUNTRY_CONFIG = {
         "vacCode": ["PRT-LON"],
         "visaCategoryCode": "TV",
     },
+    "mlt": {
+        "countryCode": "gbr",
+        "missionCode": "mlt",
+        "vacCode": "MLT-LON",
+        "visaCategoryCode": "TA",
+    },
 }
 
 TWILIO_CONFIG = {
