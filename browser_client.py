@@ -2,8 +2,61 @@
 from selenium.common.exceptions import TimeoutException
 from seleniumbase import SB
 import json
+import os
 
 from config import COUNTRY_CONFIG, PROXY_CONFIG
+
+
+def _build_proxy_extension(proxy_string: str, out_dir: str) -> str:
+    """
+    Write a Chrome MV3 extension that silently handles proxy authentication.
+    The proxy host:port is set via --proxy-server Chrome flag at launch;
+    this extension only intercepts onAuthRequired and returns credentials.
+    """
+    # Parse  user:pass@host:port
+    at = proxy_string.rfind("@")
+    user_pass = proxy_string[:at]
+    host_port = proxy_string[at + 1:]
+    colon = user_pass.index(":")
+    username = user_pass[:colon]
+    password = user_pass[colon + 1:]
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    background_js = f"""\
+chrome.webRequest.onAuthRequired.addListener(
+  function(details) {{
+    return {{
+      authCredentials: {{
+        username: "{username}",
+        password: "{password}"
+      }}
+    }};
+  }},
+  {{urls: ["<all_urls>"]}},
+  ["blocking"]
+);
+"""
+
+    manifest_json = """\
+{
+  "version": "1.0.0",
+  "manifest_version": 3,
+  "name": "Proxy Auth",
+  "permissions": ["webRequest", "webRequestAuthProvider"],
+  "host_permissions": ["<all_urls>"],
+  "background": {"service_worker": "background.js"},
+  "minimum_chrome_version": "88.0.0"
+}
+"""
+
+    with open(os.path.join(out_dir, "background.js"), "w") as f:
+        f.write(background_js)
+    with open(os.path.join(out_dir, "manifest.json"), "w") as f:
+        f.write(manifest_json)
+
+    print(f"[BrowserClient] Proxy extension written → {out_dir}")
+    return out_dir
 
 
 class BrowserClient:
@@ -12,26 +65,70 @@ class BrowserClient:
         self.sb = None
         self._config = COUNTRY_CONFIG[country]
 
-        import os
-        user_data_dir = os.path.abspath(f"browser_sessions/{country}_session")
-        os.makedirs(user_data_dir, exist_ok=True)
-        print(f"[BrowserClient] Session dir: {user_data_dir}")
+        print(f"[BrowserClient] ── Initialising BrowserClient ──")
+        print(f"[BrowserClient]   country   : {country}")
+        print(f"[BrowserClient]   UC mode   : {uc}  (undetected Chrome, bypasses Cloudflare)")
+        print(f"[BrowserClient]   incognito : True  (fresh isolated session every run)")
+        print(f"[BrowserClient]   headless  : {headless}")
+        print(f"[BrowserClient]   proxy     : {'enabled' if proxy else 'disabled'}")
+
+        # Base Chrome flags
+        chromium_arg = "--disable-gpu,--disable-software-rasterizer,--disable-dev-shm-usage"
+
+        ext_dir = None
+        if proxy:
+            proxy_str = PROXY_CONFIG["proxy"]
+            host_port = proxy_str.rsplit("@", 1)[-1]
+
+            print(f"[BrowserClient]   proxy host: {host_port}")
+            print(f"[BrowserClient] Setting --proxy-server={host_port} (Chrome-level, works in incognito)")
+
+            # Set proxy at the Chrome level — works in incognito, bypasses SB wrapper
+            chromium_arg += f",--proxy-server={host_port}"
+            # Allow our extension to run inside incognito windows
+            chromium_arg += ",--allow-extensions-in-incognito"
+            print(f"[BrowserClient] Flag added: --allow-extensions-in-incognito")
+
+            # Build auth extension — silently handles onAuthRequired, no dialog
+            ext_dir = os.path.abspath("browser_sessions/proxy_ext")
+            _build_proxy_extension(proxy_str, ext_dir)
+            print(f"[BrowserClient] Proxy auth extension: {ext_dir}")
+        else:
+            print(f"[BrowserClient] No proxy configured — connecting directly.")
 
         browser_params = {
-            "uc": True,           # UC mode — undetected Chrome, bypasses Cloudflare
+            "uc": True,          # undetected Chrome
             "headless2": headless,
-            "user_data_dir": user_data_dir,  # persists session; automatically disables incognito
-            "proxy": PROXY_CONFIG["proxy"] if proxy else None,
-            "chromium_arg": "--disable-gpu,--disable-software-rasterizer,--disable-dev-shm-usage",
+            "incognito": True,   # fresh isolated session
+            "chromium_arg": chromium_arg,
+            # proxy= intentionally omitted — handled via --proxy-server + extension above
         }
+        if ext_dir:
+            browser_params["extension_dir"] = ext_dir
+            print(f"[BrowserClient] extension_dir: {ext_dir}")
+
+        print(f"[BrowserClient] Final browser_params:")
+        for k, v in browser_params.items():
+            if k == "chromium_arg":
+                for flag in v.split(","):
+                    print(f"[BrowserClient]   chromium_arg → {flag.strip()}")
+            else:
+                print(f"[BrowserClient]   {k} = {v}")
+
+        print(f"[BrowserClient] Calling SB() to create browser context...")
         self._sb_ctx = SB(**browser_params)
+        print(f"[BrowserClient] SB context created. Browser will launch on __enter__.")
 
     def __enter__(self):
+        print(f"[BrowserClient] __enter__ — launching Chrome...")
         self.sb = self._sb_ctx.__enter__()
+        print(f"[BrowserClient] Chrome launched successfully.")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        print(f"[BrowserClient] __exit__ — closing browser...")
         self._sb_ctx.__exit__(exc_type, exc_val, exc_tb)
+        print(f"[BrowserClient] Browser closed.")
 
     def open_login_page(self):
         url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
