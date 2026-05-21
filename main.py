@@ -81,28 +81,30 @@ class VfsScraper:
 
     def start_monitoring(self):
         with BrowserClient(self.country, proxy=True) as browser:
-            # Check if we have a valid session from previous run
-            print("Found valid session, attempting to reuse...")
-            self.auth_token = browser.get_auth_token()
-            if self.auth_token:
-                    print("Session reused successfully!")
-            else:
-                    print("Session invalid, authenticating fresh...")
-                    self.auth_token = AuthHandler(
-                        self.country, self.email, self.password, browser
-                    ).authenticate()
-                
+            print(f"[VfsScraper] Browser launched. Navigating to VFS login page...")
+
+            # Always open the login page first — this is what loads the VFS URL.
+            # Checking get_auth_token() before any navigation returns nothing useful.
+            auth = AuthHandler(self.country, self.email, self.password, browser)
+            self.auth_token = auth.authenticate()
+
             if self.auth_token is None:
-                print("Auth token is none. Exiting.")
+                print("[VfsScraper] Authentication failed — no JWT obtained. Exiting.")
                 return
-                
+
+            print(f"[VfsScraper] Authenticated. JWT length={len(self.auth_token)}.")
+
+            # Click past the initial landing button if present (post-login screen)
             browser.sb.sleep(5)
-            browser.sb.driver.uc_click("button.mat-btn-lg")
+            try:
+                browser.sb.driver.uc_click("button.mat-btn-lg")
+                print("[VfsScraper] Clicked post-login button.")
+            except Exception:
+                print("[VfsScraper] No post-login button found (may be normal).")
             browser.sb.sleep(5)
-            
-            print(f"Starting monitoring for {self.country} with account {self.email}")
-            print(f"Session persistence: {self.persist_session}")
-            print(f"Max runtime: {self.max_runtime//60} minutes")
+
+            print(f"[VfsScraper] Starting slot monitoring for {self.country} / {self.email}")
+            print(f"[VfsScraper] Max runtime: {self.max_runtime // 60} minutes")
             
             while True:
                 if time.time() - self.start_time > self.max_runtime:

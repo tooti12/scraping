@@ -2,7 +2,6 @@
 from selenium.common.exceptions import TimeoutException
 from seleniumbase import SB
 import json
-import os
 
 from config import COUNTRY_CONFIG, PROXY_CONFIG
 
@@ -13,14 +12,13 @@ class BrowserClient:
         self.sb = None
         self._config = COUNTRY_CONFIG[country]
 
-        # Persistent Chrome profile so the session (JWT) survives between runs
-        user_data_dir = f"browser_sessions/{country}_session"
-        os.makedirs(user_data_dir, exist_ok=True)
-
+        # incognito=True gives a clean, isolated session every run.
+        # This avoids the Windows "restore crashed session" dialog that blocks
+        # the ChromeDriver connection when user_data_dir is used.
         browser_params = {
             "uc": uc,
             "headless2": headless,
-            "user_data_dir": user_data_dir,  # session persistence; disables incognito
+            "incognito": True,
             "proxy": PROXY_CONFIG["proxy"] if proxy else None,
             "chromium_arg": "--disable-gpu,--disable-software-rasterizer,--disable-dev-shm-usage",
         }
