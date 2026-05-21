@@ -3,6 +3,7 @@ import time
 import itertools
 import json
 import os
+import threading
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -11,7 +12,38 @@ from auth_handler import AuthHandler
 from browser_client import BrowserClient
 from config import COUNTRY_CONFIG
 from notification_handler import SMSNotifier
-import screen_keeper
+
+
+def _keep_screen_awake():
+    """Move the mouse by 1 px every 30 s to prevent the screen from sleeping."""
+    try:
+        import pyautogui
+        pyautogui.FAILSAFE = False
+        while True:
+            try:
+                x, y = pyautogui.position()
+                pyautogui.moveTo(x + 1, y + 1, duration=0.1)
+                pyautogui.moveTo(x, y, duration=0.1)
+            except Exception:
+                pass
+            time.sleep(30)
+    except ImportError:
+        # pyautogui not available — fall back to xdotool if present
+        import subprocess
+        while True:
+            try:
+                subprocess.run(
+                    ["xdotool", "mousemove_relative", "--", "1", "0"],
+                    capture_output=True, check=False
+                )
+                time.sleep(0.3)
+                subprocess.run(
+                    ["xdotool", "mousemove_relative", "--", "-1", "0"],
+                    capture_output=True, check=False
+                )
+            except Exception:
+                pass
+            time.sleep(30)
 
 
 class VfsScraper:
@@ -31,7 +63,7 @@ class VfsScraper:
         
         # Create logs directory
         os.makedirs("logs", exist_ok=True)
-        self.log_file = f"logs/nld_appointments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        self.log_file = f"logs/{country}_appointments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
     def log_appointment_data(self, data: Dict[str, Any]):
         """Log appointment data to file"""
@@ -48,7 +80,7 @@ class VfsScraper:
             print(f"Error logging appointment data: {e}")
 
     def start_monitoring(self):
-        with BrowserClient(self.country, proxy=False) as browser:
+        with BrowserClient(self.country, proxy=True) as browser:
             # Check if we have a valid session from previous run
             print("Found valid session, attempting to reuse...")
             self.auth_token = browser.get_auth_token()
@@ -226,21 +258,48 @@ class VfsScraper:
 
 
 if __name__ == "__main__":
-    screen_keeper.start()
-
+    # BGR (Bulgaria) account — OTP arrives at Gmail inbox
     accounts = [
         ("bgr", "umar.jwork@gmail.com", "P@ssword123"),
     ]
 
-    print("VFS Scraper — Bulgaria (BGR)")
-    print("=" * 50)
-    print("Account : umar.jwork@gmail.com")
-    print("Route   : GBR (London) -> BGR (Bulgaria)")
+    # Keep screen awake during long browser sessions
+    mouse_thread = threading.Thread(target=_keep_screen_awake, daemon=True)
+    mouse_thread.start()
+    print("Screen-awake thread started.")
+    print("VFS Appointment Scraper - GBR -> BGR (Bulgaria)")
     print("=" * 50)
 
     for country, email, password in itertools.cycle(accounts):
-        print(f"\n=== Starting session [{country.upper()}] {email} ===")
+        print(f"\n=== Starting session for {email} ({country.upper()}) ===")
+
         scraper = VfsScraper(country, email, password)
         scraper.start_monitoring()
-        print(f"=== Session ended. Restarting in 60s... ===")
+
+        print(f"=== Finished 30-min session for {email} ===")
         time.sleep(60)
+
+    if False:
+        # dead code — old MLT reference block, kept so nothing is lost
+        print("�� Enhanced MLT VFS Appointment Scraper")
+    print("=" * 50)
+    print("✅ Features:")
+    print("   • Session persistence enabled")
+    print("   • Comprehensive response handling")
+    print("   • Detailed appointment extraction")
+    print("   • Smart retry logic")
+    print("   • JSON logging of all appointments")
+    print("   • London (GBR) to Malta (MLT) configuration")
+    print("=" * 50)
+
+    for country, email, password in itertools.cycle(accounts):
+        print(f"\n🚀 === Starting session for {email} ===")
+        print(f"📁 Session files will be saved in: browser_sessions/")
+        print(f"📋 Logs will be saved in: logs/")
+
+        scraper = VfsScraper(country, email, password)
+        scraper.start_monitoring()
+
+        print(f"✅ === Finished 30 min session for {email} ===")
+        print(f"📊 Check logs for detailed appointment information")
+        time.sleep(60)  # short pause before restarting with next account

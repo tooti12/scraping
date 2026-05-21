@@ -1,18 +1,23 @@
 # notification_handler.py
-import email as _email_lib
+import email as email_lib
 import imaplib
 import re
 import time
 
 import requests
 
-from config import GMAIL_CONFIG
+from config import EMAIL_CONFIG, GMAIL_CONFIG
 
 
 class SMSNotifier:
     def __init__(self):
+
         self.url = "https://api.callmebot.com/whatsapp.php"
-        self.payload = {"phone": "447724267222", "apikey": 1122425}
+
+        self.payload = {
+            "phone": "447724267222",
+            "apikey": 1122425,
+        }
 
     def send_sms(self, message):
         self.payload["text"] = message
@@ -22,60 +27,123 @@ class SMSNotifier:
 
 
 class EmailClient:
-    """
-    Reads the VFS OTP from Gmail via IMAP.
-    Interface kept identical to the original so auth_handler.py needs no changes:
-        EmailClient().get_otp(email=email)
-    """
+    """Legacy IMAP client for thesemantics.co accounts."""
 
-    _OTP_RE = re.compile(r"\b(\d{6})\b")
+    def get_otp(self, email):
+        try:
+            with imaplib.IMAP4_SSL(EMAIL_CONFIG["imap_server"]) as mail:
+                mail.login(email, EMAIL_CONFIG["password"])
+                mail.select("inbox")
+                status, messages = mail.search(None, 'SUBJECT "One Time Password"')
 
-    def get_otp(self, email, retries: int = 8, wait_seconds: int = 10):
-        """
-        Poll Gmail until the VFS OTP email arrives.
-        `email` is used as the IMAP login username (the Gmail address).
-        Returns the 6-digit OTP string, or None if not found.
-        """
-        sender = GMAIL_CONFIG["otp_sender"]
-        app_password = GMAIL_CONFIG["app_password"]
+                if messages[0]:
+                    latest_email_id = messages[0].split()[-1]
+                    status, msg_data = mail.fetch(latest_email_id, "(RFC822)")
+                    return self._extract_otp(msg_data[0][1])
+        except Exception as e:
+            print(f"Error retrieving OTP: {e}")
+            return None
 
-        print(
-            f"[EmailClient] Polling Gmail for OTP from {sender} "
-            f"(up to {retries * wait_seconds}s)...",
-            flush=True,
-        )
+    def _extract_otp(self, raw_email):
+        msg = email_lib.message_from_bytes(raw_email)
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                if content_type == "text/plain":
+                    return re.search(r"\d{6}", part.get_payload()).group()
+        return re.search(r"\d{6}", msg.get_payload()).group()
 
-        for attempt in range(1, retries + 1):
+
+class GmailOTPClient:
+    """Reads the VFS OTP from a Gmail inbox using IMAP + App Password."""
+
+    def get_otp(self, email_address, max_wait=90, poll_interval=5):
+        """Poll Gmail until a fresh OTP email from VFS arrives (up to max_wait seconds)."""
+        app_password = GMAIL_CONFIG["app_password"].replace(" ", "")
+        imap_server = GMAIL_CONFIG["imap_server"]
+        start = time.time()
+
+        print(f"[GmailOTPClient] Connecting to {imap_server} as {email_address} ...")
+
+        while time.time() - start < max_wait:
+            elapsed = int(time.time() - start)
             try:
-                with imaplib.IMAP4_SSL(GMAIL_CONFIG["imap_server"], GMAIL_CONFIG["imap_port"]) as mail:
-                    mail.login(email, app_password)
+                with imaplib.IMAP4_SSL(imap_server) as mail:
+                    mail.login(email_address, app_password)
+                    print(f"[GmailOTPClient] Logged in. Searching inbox for VFS email... ({elapsed}s elapsed)")
                     mail.select("inbox")
-                    status, messages = mail.search(None, f'FROM "{sender}"')
-                    if status == "OK" and messages[0]:
-                        latest_id = messages[0].split()[-1]
-                        _, data = mail.fetch(latest_id, "(RFC822)")
-                        otp = self._extract_otp(data[0][1])
-                        if otp:
-                            print(f"[EmailClient] OTP found on attempt {attempt}: {otp}", flush=True)
-                            return otp
+
+                    # Search by sender (donotreply@vfshelpline.com)
+                    status, messages = mail.search(None, 'FROM "donotreply@vfshelpline.com"')
+
+                    if messages[0]:
+                        email_ids = messages[0].split()
+                        print(f"[GmailOTPClient] Found {len(email_ids)} VFS email(s) in inbox. Checking most recent...")
+                        # Check the 5 most recent emails to avoid stale OTPs
+                        for eid in reversed(email_ids[-5:]):
+                            status, msg_data = mail.fetch(eid, "(RFC822)")
+                            if msg_data and msg_data[0]:
+                                print(f"[GmailOTPClient] Fetched email id={eid.decode()}. Extracting OTP...")
+                                otp = self._extract_otp(msg_data[0][1])
+                                if otp:
+                                    print(f"[GmailOTPClient] OTP extracted successfully: {otp}")
+                                    return otp
+                                else:
+                                    print(f"[GmailOTPClient] No OTP pattern found in email id={eid.decode()}, trying next...")
+                    else:
+                        print(f"[GmailOTPClient] No VFS emails found yet. ({elapsed}s elapsed)")
+
             except Exception as exc:
-                print(f"[EmailClient] Attempt {attempt}/{retries} error: {exc}", flush=True)
+                print(f"[GmailOTPClient] Error checking Gmail: {exc}")
 
-            if attempt < retries:
-                print(f"[EmailClient] Attempt {attempt}/{retries}: not yet, waiting {wait_seconds}s...", flush=True)
-                time.sleep(wait_seconds)
+            print(f"[GmailOTPClient] Waiting {poll_interval}s before next check...")
+            time.sleep(poll_interval)
 
-        print("[EmailClient] OTP not found after all retries.", flush=True)
+        print(f"[GmailOTPClient] Timed out after {max_wait}s — no OTP email received.")
         return None
 
-    def _extract_otp(self, raw_bytes: bytes):
-        msg = _email_lib.message_from_bytes(raw_bytes)
-        parts = list(msg.walk()) if msg.is_multipart() else [msg]
-        for part in parts:
-            if part.get_content_type() in ("text/plain", "text/html"):
-                payload = part.get_payload(decode=True)
-                if payload:
-                    m = self._OTP_RE.search(payload.decode(errors="ignore"))
-                    if m:
-                        return m.group(1)
+    def _extract_otp(self, raw_email):
+        msg = email_lib.message_from_bytes(raw_email)
+        sender = msg.get("From", "unknown")
+        subject = msg.get("Subject", "unknown")
+        print(f"[GmailOTPClient] Email from: {sender} | Subject: {subject}")
+
+        body = self._get_body(msg)
+        print(f"[GmailOTPClient] Email body preview: {body[:120].strip()!r}")
+
+        # Primary pattern: "VFS Global is 873647"
+        match = re.search(r"VFS Global is\s+(\d{6})", body, re.IGNORECASE)
+        if match:
+            print(f"[GmailOTPClient] OTP matched via primary pattern.")
+            return match.group(1)
+
+        # Generic fallback: any standalone 6-digit number
+        match = re.search(r"\b(\d{6})\b", body)
+        if match:
+            print(f"[GmailOTPClient] OTP matched via fallback 6-digit pattern.")
+            return match.group(1)
+
+        print("[GmailOTPClient] Could not extract OTP from this email.")
         return None
+
+    def _get_body(self, msg):
+        body = ""
+        if msg.is_multipart():
+            for part in msg.walk():
+                ct = part.get_content_type()
+                if ct == "text/plain":
+                    try:
+                        body += part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+                elif ct == "text/html" and not body:
+                    try:
+                        body += part.get_payload(decode=True).decode("utf-8", errors="ignore")
+                    except Exception:
+                        pass
+        else:
+            try:
+                body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+            except Exception:
+                body = str(msg.get_payload())
+        return body
