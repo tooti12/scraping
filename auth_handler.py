@@ -45,12 +45,19 @@ class AuthHandler:
             return None
 
     def _enter_credentials(self):
-        print(f"[AuthHandler] Solving captcha (pre-credential)...")
-        self.browser.solve_captcha()
+        self.browser.sb.sleep(2)
         print(f"[AuthHandler] Typing email: {self.email}")
-        self.browser.sb.cdp.press_keys("#email", self.email)
-        print("[AuthHandler] Typing password...")
-        self.browser.sb.cdp.press_keys("#password", self.password)
+        try:
+            self.browser.sb.wait_for_element("#email", timeout=10)
+            self.browser.sb.type("#email", self.email)
+            print("[AuthHandler] Email entered.")
+            self.browser.sb.wait_for_element("#password", timeout=5)
+            self.browser.sb.type("#password", self.password)
+            print("[AuthHandler] Password entered.")
+        except Exception as e:
+            print(f"[AuthHandler] Primary selectors failed ({e}), trying name-based fallback...")
+            self.browser.sb.type('input[name="email"]', self.email)
+            self.browser.sb.type('input[name="password"]', self.password)
         print("[AuthHandler] Waiting for login button...")
         self.browser.sb.wait_for_element("button.mat-btn-lg", timeout=50)
         print("[AuthHandler] Solving captcha (post-credential)...")
@@ -96,8 +103,8 @@ class AuthHandler:
         print(f"[AuthHandler] OTP received: {otp}")
         print("[AuthHandler] Solving captcha before OTP entry...")
         self.browser.solve_captcha()
-        print(f"[AuthHandler] Typing OTP into field...")
-        self.browser.sb.cdp.press_keys("#mat-input-3", str(otp))
+        print("[AuthHandler] Typing OTP into field...")
+        self.browser.sb.type("#mat-input-3", str(otp))
         print("[AuthHandler] Clicking submit button...")
         self.browser.sb.driver.uc_click("button.mat-btn-lg")
         print("[AuthHandler] OTP submitted. Waiting 10s for session to establish...")

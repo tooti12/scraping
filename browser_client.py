@@ -12,13 +12,15 @@ class BrowserClient:
         self.sb = None
         self._config = COUNTRY_CONFIG[country]
 
-        # UC mode (uc=True) without incognito — this is the key combination.
-        # In incognito, Chrome blocks SeleniumBase's proxy-auth extension from
-        # loading, which causes the proxy credentials dialog to appear.
-        # Without incognito, UC mode loads the extension and handles auth silently.
+        import os
+        user_data_dir = os.path.abspath(f"browser_sessions/{country}_session")
+        os.makedirs(user_data_dir, exist_ok=True)
+        print(f"[BrowserClient] Session dir: {user_data_dir}")
+
         browser_params = {
-            "uc": uc,
+            "uc": True,           # UC mode — undetected Chrome, bypasses Cloudflare
             "headless2": headless,
+            "user_data_dir": user_data_dir,  # persists session; automatically disables incognito
             "proxy": PROXY_CONFIG["proxy"] if proxy else None,
             "chromium_arg": "--disable-gpu,--disable-software-rasterizer,--disable-dev-shm-usage",
         }
@@ -32,9 +34,17 @@ class BrowserClient:
         self._sb_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def open_login_page(self):
-        self.sb.activate_cdp_mode(
-            f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
-        )
+        url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
+        print(f"[BrowserClient] Opening login page: {url}")
+        self.sb.open(url)          # normal UC-mode navigation (not CDP mode)
+        self.sb.sleep(5)
+        try:
+            self.sb.wait_for_element("#email", timeout=15)
+            print("[BrowserClient] Login form ready (#email found).")
+        except Exception:
+            print("[BrowserClient] #email not found yet, sleeping extra 10s...")
+            self.sb.sleep(10)
+        print("[BrowserClient] Login page loaded.")
 
     def handle_cookies(self):
         try:
