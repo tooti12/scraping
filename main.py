@@ -11,6 +11,7 @@ from auth_handler import AuthHandler
 from browser_client import BrowserClient
 from config import COUNTRY_CONFIG
 from notification_handler import SMSNotifier
+import screen_keeper
 
 
 class VfsScraper:
@@ -225,30 +226,21 @@ class VfsScraper:
 
 
 if __name__ == "__main__":
-    # Use Malta (MLT) with bot credentials
+    screen_keeper.start()
+
     accounts = [
-        ("mlt", "hmi765f@gmail.com", "P@ssword123"),
+        ("bgr", "umar.jwork@gmail.com", "P@ssword123"),
     ]
 
-    print("�� Enhanced MLT VFS Appointment Scraper")
+    print("VFS Scraper — Bulgaria (BGR)")
     print("=" * 50)
-    print("✅ Features:")
-    print("   • Session persistence enabled")
-    print("   • Comprehensive response handling")
-    print("   • Detailed appointment extraction")
-    print("   • Smart retry logic")
-    print("   • JSON logging of all appointments")
-    print("   • London (GBR) to Malta (MLT) configuration")
+    print("Account : umar.jwork@gmail.com")
+    print("Route   : GBR (London) -> BGR (Bulgaria)")
     print("=" * 50)
 
     for country, email, password in itertools.cycle(accounts):
-        print(f"\n🚀 === Starting session for {email} ===")
-        print(f"📁 Session files will be saved in: browser_sessions/")
-        print(f"📋 Logs will be saved in: logs/")
-
+        print(f"\n=== Starting session [{country.upper()}] {email} ===")
         scraper = VfsScraper(country, email, password)
         scraper.start_monitoring()
-
-        print(f"✅ === Finished 30 min session for {email} ===")
-        print(f"📊 Check logs for detailed appointment information")
-        time.sleep(60)  # short pause before restarting with next account
+        print(f"=== Session ended. Restarting in 60s... ===")
+        time.sleep(60)
