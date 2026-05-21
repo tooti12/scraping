@@ -12,13 +12,13 @@ class BrowserClient:
         self.sb = None
         self._config = COUNTRY_CONFIG[country]
 
-        # incognito=True gives a clean, isolated session every run.
-        # This avoids the Windows "restore crashed session" dialog that blocks
-        # the ChromeDriver connection when user_data_dir is used.
+        # UC mode (uc=True) without incognito — this is the key combination.
+        # In incognito, Chrome blocks SeleniumBase's proxy-auth extension from
+        # loading, which causes the proxy credentials dialog to appear.
+        # Without incognito, UC mode loads the extension and handles auth silently.
         browser_params = {
             "uc": uc,
             "headless2": headless,
-            "incognito": True,
             "proxy": PROXY_CONFIG["proxy"] if proxy else None,
             "chromium_arg": "--disable-gpu,--disable-software-rasterizer,--disable-dev-shm-usage",
         }
