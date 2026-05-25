@@ -5,7 +5,7 @@ import json
 import os
 import threading
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from api_client import APIClient
 from auth_handler import AuthHandler
@@ -93,170 +93,84 @@ class VfsScraper:
                 return
 
             print(f"[VfsScraper] Authenticated. JWT length={len(self.auth_token)}.")
-
-            # Click past the initial landing button if present (post-login screen)
-            browser.sb.sleep(5)
-            try:
-                browser.sb.driver.uc_click("button.mat-btn-lg")
-                print("[VfsScraper] Clicked post-login button.")
-            except Exception:
-                print("[VfsScraper] No post-login button found (may be normal).")
-            browser.sb.sleep(5)
+            browser.sb.sleep(3)
 
             print(f"[VfsScraper] Starting slot monitoring for {self.country} / {self.email}")
             print(f"[VfsScraper] Max runtime: {self.max_runtime // 60} minutes")
-            
+
             while True:
                 if time.time() - self.start_time > self.max_runtime:
-                    print("Reached 30-minute limit. Exiting...")
+                    print("[VfsScraper] 30-minute limit reached. Exiting.")
                     return
-                    
+
                 try:
-                    response = browser.call_check_slot(
-                        jwt_token=self.auth_token, login_user=self.email
-                    )
-                    
-                    # Log the raw response
+                    # Test every (centre × appt_category × sub_category) combination
+                    # with a 5-second pause between each.
+                    results = browser.check_all_combinations(delay_secs=5)
+
                     self.log_appointment_data({
-                        "type": "api_response",
-                        "response": response
+                        "type": "combo_scan",
+                        "results": results,
                     })
-                    
-                    # Handle comprehensive response analysis
-                    self._handle_comprehensive_response(response, browser)
-                    
-                    # Determine next action based on analysis
-                    analysis = response.get("analysis", {})
-                    action = analysis.get("action", "wait")
-                    
-                    if action == "book":
-                        print("🎯 SLOTS AVAILABLE - Check logs for details!")
-                        slots = analysis.get("details", {}).get("slots", [])
-                        for slot in slots:
-                            self._log_detailed_slot_info(slot)
-                        time.sleep(1800)  # 30 minutes
-                    elif action == "join_waitlist":
-                        print("📋 WAITLIST OPEN - Check logs for details!")
-                        self._handle_available_slot("Netherlands", "Waitlist Open", waitlist=True)
+
+                    slots_found = [r for r in results if r["result"] == "slots_available"]
+                    errors      = [r for r in results if r["result"] == "error"]
+
+                    if slots_found:
+                        for r in slots_found:
+                            msg = (
+                                f"VFS {self.country.upper()} SLOT AVAILABLE: "
+                                f"{r['centre']['text']} / "
+                                f"{r['appt_cat']['text']} / "
+                                f"{r['sub_cat']['text']}"
+                            )
+                            print(f"[VfsScraper] {msg}")
+                            self.notifier.send_sms(msg)
+                        # Pause for 30 min so user can act before re-scanning
+                        print("[VfsScraper] Waiting 30 min before next full scan.")
                         time.sleep(1800)
-                    elif action == "reauthenticate":
-                        print("🔄 Session expired - Reauthenticating...")
+
+                    elif errors and len(errors) == len(results):
+                        # Every single combo errored — likely session/page problem
+                        print("[VfsScraper] All combos returned error — retrying in 60 s.")
                         self.retry_count += 1
                         if self.retry_count >= self.max_retries:
-                            print("Max retries reached. Exiting...")
-                            return
-                        # Re-authenticate
-                        self.auth_token = AuthHandler(
-                            self.country, self.email, self.password, browser
-                        ).authenticate()
-                        if not self.auth_token:
-                            print("Re-authentication failed. Exiting...")
-                            return
-                        time.sleep(30)
-                    elif action == "wait_longer":
-                        print("⏰ Rate limited - Waiting longer...")
-                        time.sleep(300)  # 5 minutes
-                    elif action == "retry":
-                        print("🔄 Retrying...")
-                        self.retry_count += 1
-                        if self.retry_count >= self.max_retries:
-                            print("Max retries reached. Exiting...")
+                            print("[VfsScraper] Max retries reached. Exiting.")
                             return
                         time.sleep(60)
-                    else:  # wait or continue
+
+                    else:
+                        print(f"[VfsScraper] Scan done — no slots. "
+                              f"Waiting 150 s before next full scan.")
                         time.sleep(150)
-                        
-                except Exception as e:
-                    print(f"Monitoring error: {e}")
-                    self.log_appointment_data({
-                        "type": "error",
-                        "error": str(e)
-                    })
+
+                except RuntimeError as e:
+                    if "SESSION_EXPIRED" in str(e):
+                        print(f"[VfsScraper] Session expired mid-scan — exiting to re-authenticate. ({e})")
+                        return
+                    print(f"[VfsScraper] Monitoring error: {e}")
+                    self.log_appointment_data({"type": "error", "error": str(e)})
                     self.retry_count += 1
                     if self.retry_count >= self.max_retries:
-                        print("Max retries reached due to errors. Exiting...")
+                        print("[VfsScraper] Max retries reached due to errors. Exiting.")
+                        return
+                    time.sleep(60)
+                except Exception as e:
+                    print(f"[VfsScraper] Monitoring error: {e}")
+                    self.log_appointment_data({"type": "error", "error": str(e)})
+                    self.retry_count += 1
+                    if self.retry_count >= self.max_retries:
+                        print("[VfsScraper] Max retries reached due to errors. Exiting.")
                         return
                     time.sleep(60)
 
-    def _handle_comprehensive_response(self, response: Dict[str, Any], browser):
-        """Handle the comprehensive response analysis"""
-        analysis = response.get("analysis", {})
-        status = analysis.get("status", "unknown")
-        details = analysis.get("details", {})
-        
-        print(f"📊 Response Analysis: {status}")
-        print(f"🎯 Action: {analysis.get('action', 'unknown')}")
-        
-        if status == "slots_available":
-            slot_count = details.get("slot_count", 0)
-            print(f"🎉 Found {slot_count} slot(s) available!")
-            
-        elif status == "waitlist_open":
-            print("📋 Waitlist is open!")
-            
-        elif status == "session_expired":
-            print("🔑 Session has expired")
-            
-        elif status == "rate_limited":
-            print("⏱️ Rate limited by VFS")
-            
-        elif status == "no_slots":
-            print("❌ No slots available")
-            
-        elif status == "api_error":
-            error_info = details.get("error", {})
-            print(f"⚠️ API Error: {error_info}")
-
-    def _log_detailed_slot_info(self, slot: Dict[str, Any]):
-        """Log detailed slot information"""
-        try:
-            print("=" * 60)
-            print("🎯 DETAILED APPOINTMENT INFORMATION")
-            print("=" * 60)
-            print(f"📅 Appointment Type: {slot.get('appointment_type', 'Unknown')}")
-            print(f"🏢 Center: {slot.get('center_name', 'Unknown')}")
-            print(f"📋 Visa Category: {slot.get('visa_category', 'Unknown')}")
-            print(f"📆 Earliest Date: {slot.get('earliest_date', 'Not specified')}")
-            print(f"📍 Status: {slot.get('slot_status', 'Unknown')}")
-            print(f"✅ Booking Allowed: {slot.get('booking_allowed', False)}")
-            print(f"📝 Waitlist Available: {slot.get('waitlist_available', False)}")
-            
-            if slot.get('available_dates'):
-                print(f"🗓️ Available Dates: {', '.join(slot['available_dates'][:5])}")
-                
-            if slot.get('time_slots'):
-                print(f"⏰ Time Slots: {', '.join(slot['time_slots'][:3])}")
-                
-            # NLD specific information
-            nld_info = slot.get('nld_specific', {})
-            if nld_info:
-                print("🇳🇱 NLD Specific Information:")
-                if nld_info.get('document_type'):
-                    print(f"   📄 Document Type: {nld_info['document_type']}")
-                if nld_info.get('purpose_of_travel'):
-                    print(f"   🎯 Purpose: {nld_info['purpose_of_travel']}")
-                if nld_info.get('appointment_duration'):
-                    print(f"   ⏱️ Duration: {nld_info['appointment_duration']}")
-                if nld_info.get('required_documents'):
-                    print(f"   📋 Required: {', '.join(nld_info['required_documents'])}")
-            
-            print("=" * 60)
-            
-            # Log to file
-            self.log_appointment_data({
-                "type": "detailed_slot",
-                "slot_info": slot
-            })
-            
-        except Exception as e:
-            print(f"Error logging slot details: {e}")
-
     def _handle_available_slot(self, city=None, date_str=None, waitlist=False):
         if waitlist:
-            self.notifier.send_sms(f"VFS Appointments waitlist Open")
+            self.notifier.send_sms("VFS Appointments waitlist Open")
         else:
-            message = f"{self.country} {city} earliestDate {date_str}"
-            self.notifier.send_sms(f"VFS Appointments {message} available")
+            self.notifier.send_sms(
+                f"VFS Appointments {self.country} {city} earliestDate {date_str} available"
+            )
 
 
 if __name__ == "__main__":
@@ -274,34 +188,7 @@ if __name__ == "__main__":
 
     for country, email, password in itertools.cycle(accounts):
         print(f"\n=== Starting session for {email} ({country.upper()}) ===")
-
         scraper = VfsScraper(country, email, password)
         scraper.start_monitoring()
-
-        print(f"=== Finished 30-min session for {email} ===")
+        print(f"=== Finished session for {email} — pausing 60 s ===")
         time.sleep(60)
-
-    if False:
-        # dead code — old MLT reference block, kept so nothing is lost
-        print("�� Enhanced MLT VFS Appointment Scraper")
-    print("=" * 50)
-    print("✅ Features:")
-    print("   • Session persistence enabled")
-    print("   • Comprehensive response handling")
-    print("   • Detailed appointment extraction")
-    print("   • Smart retry logic")
-    print("   • JSON logging of all appointments")
-    print("   • London (GBR) to Malta (MLT) configuration")
-    print("=" * 50)
-
-    for country, email, password in itertools.cycle(accounts):
-        print(f"\n🚀 === Starting session for {email} ===")
-        print(f"📁 Session files will be saved in: browser_sessions/")
-        print(f"📋 Logs will be saved in: logs/")
-
-        scraper = VfsScraper(country, email, password)
-        scraper.start_monitoring()
-
-        print(f"✅ === Finished 30 min session for {email} ===")
-        print(f"📊 Check logs for detailed appointment information")
-        time.sleep(60)  # short pause before restarting with next account

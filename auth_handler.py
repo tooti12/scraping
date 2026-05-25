@@ -94,7 +94,7 @@ class AuthHandler:
         self.browser.sb.sleep(20)
 
         print("[AuthHandler] Fetching OTP from email inbox...")
-        otp = otp_client.get_otp(email=email)
+        otp = otp_client.get_otp(email)
 
         if otp is None:
             print("[AuthHandler] Failed to retrieve OTP — cannot complete login.")

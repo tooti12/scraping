@@ -6,24 +6,53 @@ COUNTRY_CONFIG = {
         "missionCode": "nld",
         "vacCode": "NAKN",
         "visaCategoryCode": "TA",
+        # UI form selections on /application-detail
+        # centerCode    → mat-select-0 option id
+        # appointmentCategoryCode → mat-select-2 option id (None = pick first available)
+        # subCategoryCode → mat-select-1 option id
+        "ui": {
+            "centerCode": "NAKN",
+            "appointmentCategoryCode": None,
+            "subCategoryCode": "TA",
+        },
     },
     "prt": {
         "countryCode": "gbr",
         "missionCode": "prt",
         "vacCode": "PRT-LON",
         "visaCategoryCode": "TV",
+        "ui": {
+            "centerCode": "PRT-LON",
+            "appointmentCategoryCode": None,
+            "subCategoryCode": "TV",
+        },
     },
     "mlt": {
         "countryCode": "gbr",
         "missionCode": "mlt",
         "vacCode": "MLT-LON",
         "visaCategoryCode": "TA",
+        "ui": {
+            "centerCode": "MLT-LON",
+            "appointmentCategoryCode": None,
+            "subCategoryCode": "TA",
+        },
     },
     "bgr": {
         "countryCode": "gbr",
         "missionCode": "bgr",
         "vacCode": "BGR-LON",
         "visaCategoryCode": "TV",
+        "ui": {
+            # Option element IDs from inspect-element on /application-detail:
+            # BLUKED = Edinburgh, BLUKLN = London, BLULMN = Manchester
+            "centerCode": "BLUKLN",
+            # Appointment category (mat-select-2) options load after centre is chosen.
+            # Set to None to auto-select the first option that appears.
+            "appointmentCategoryCode": None,
+            # Sub-category (mat-select-1): BUS, BUVFF, EU, VFF, TOU
+            "subCategoryCode": "TOU",
+        },
     },
 }
 

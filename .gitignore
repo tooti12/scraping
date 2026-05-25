@@ -9,3 +9,6 @@ downloaded_files/*
 .DS_Store
 *.ipynb
 scraping.ipynb
+.claude/
+browser_sessions/
+logs/
