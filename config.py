@@ -38,6 +38,17 @@ COUNTRY_CONFIG = {
             "subCategoryCode": "TA",
         },
     },
+    "dnk": {
+        "countryCode": "gbr",
+        "missionCode": "dnk",
+        "vacCode": "DNK-LON",
+        "visaCategoryCode": "TV",
+        "ui": {
+            "centerCode": None,
+            "appointmentCategoryCode": None,
+            "subCategoryCode": None,
+        },
+    },
     "bgr": {
         "countryCode": "gbr",
         "missionCode": "bgr",

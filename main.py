@@ -174,16 +174,21 @@ class VfsScraper:
 
 
 if __name__ == "__main__":
-    # BGR (Bulgaria) account — OTP arrives at Gmail inbox
+    # DNK (Denmark) account — OTP arrives at Gmail inbox
     accounts = [
-        ("bgr", "umar.jwork@gmail.com", "P@ssword123"),
+        ("dnk", "umar.jwork@gmail.com", "P@ssword123"),
     ]
+
+    # BGR (Bulgaria) — commented out, switch back by swapping the accounts list above
+    # accounts = [
+    #     ("bgr", "umar.jwork@gmail.com", "P@ssword123"),
+    # ]
 
     # Keep screen awake during long browser sessions
     mouse_thread = threading.Thread(target=_keep_screen_awake, daemon=True)
     mouse_thread.start()
     print("Screen-awake thread started.")
-    print("VFS Appointment Scraper - GBR -> BGR (Bulgaria)")
+    print("VFS Appointment Scraper - GBR -> DNK (Denmark)")
     print("=" * 50)
 
     for country, email, password in itertools.cycle(accounts):

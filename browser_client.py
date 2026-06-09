@@ -186,6 +186,14 @@ class BrowserClient:
         print("[BrowserClient] Browser closed.")
 
     def open_login_page(self):
+        # Visit the country home page first to establish the VFS session cookie.
+        # Navigating directly to /login on some missions (e.g. DNK) triggers an
+        # Angular "Session Expired" guard because no session cookie exists yet.
+        home_url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/"
+        print(f"[BrowserClient] Warming up session via home page: {home_url}")
+        self.sb.open(home_url)
+        self.sb.sleep(3)
+
         url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
         print(f"[BrowserClient] Opening login page: {url}")
         self.sb.open(url)
@@ -545,8 +553,14 @@ class BrowserClient:
         all_combos = []
         for centre in centre_options:
             for appt_cat in appt_cats_by_centre.get(centre["id"], []):
+                # -- ALL sub-categories (commented out — Tourist-only active below) --
+                # for sub_cat in sub_cats_by_centre.get(centre["id"], []):
+                #     all_combos.append((centre, appt_cat, sub_cat))
+
+                # Tourist sub-category only
                 for sub_cat in sub_cats_by_centre.get(centre["id"], []):
-                    all_combos.append((centre, appt_cat, sub_cat))
+                    if sub_cat["text"].lower() == "tourist":
+                        all_combos.append((centre, appt_cat, sub_cat))
 
         total = len(all_combos)
         self._log("=" * 55)
