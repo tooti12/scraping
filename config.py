@@ -6,6 +6,10 @@ COUNTRY_CONFIG = {
         "missionCode": "nld",
         "vacCode": "NAKN",
         "visaCategoryCode": "TA",
+        # If no direct slots are found anywhere for this mission, automatically
+        # register the applicant (APPLICANT_CONFIG) on the waiting list via
+        # POST /appointment/applicants with isWaitlist=true.
+        "waitlist_enabled": True,
         # UI form selections on /application-detail
         # centerCode    → mat-select-0 option id
         # appointmentCategoryCode → mat-select-2 option id (None = pick first available)
@@ -65,6 +69,73 @@ COUNTRY_CONFIG = {
             "subCategoryCode": "TOU",
         },
     },
+}
+
+# Default applicant registered on a mission's waiting list when
+# `waitlist_enabled` is set in COUNTRY_CONFIG (POST /appointment/applicants,
+# isWaitlist=true). `loginUser` is filled in at runtime with the VFS account
+# email used to log in for that mission.
+APPLICANT_CONFIG = {
+    "urn": "",
+    "arn": "",
+    "firstName": "AHMAR",
+    "employerFirstName": "",
+    "middleName": "",
+    "lastName": "ALI",
+    "employerLastName": "",
+    "salutation": "",
+    "gender": 1,
+    "nationalId": None,
+    "VisaToken": None,
+    "employerContactNumber": "",
+    "contactNumber": "07724267222",
+    "dialCode": "44",
+    "employerDialCode": "",
+    "passportNumber": "EK1812233",
+    "confirmPassportNumber": None,
+    "passportExpirtyDate": "03/09/2031",
+    "dateOfBirth": "09/08/1995",
+    "emailId": "UMARJAVED56@GMAIL.COM",
+    "employerEmailId": "",
+    "nationalityCode": "PAK",
+    "state": "HERTS",
+    "city": "WGC",
+    "isEndorsedChild": False,
+    "applicantType": 0,
+    "addressline1": "31",
+    "addressline2": "MERRIFIELD",
+    "pincode": None,
+    "referenceNumber": None,
+    "vlnNumber": None,
+    "applicantGroupId": 0,
+    "parentPassportNumber": "",
+    "parentPassportExpiry": "",
+    "dateOfDeparture": None,
+    "entryType": "",
+    "eoiVisaType": "",
+    "passportType": "",
+    "vfsReferenceNumber": "",
+    "familyReunificationCerificateNumber": "",
+    "PVRequestRefNumber": "",
+    "PVStatus": "",
+    "PVStatusDescription": "",
+    "PVCanAllowRetry": True,
+    "PVisVerified": False,
+    "eefRegistrationNumber": "",
+    "isAutoRefresh": True,
+    "helloVerifyNumber": "",
+    "OfflineCClink": "",
+    "idenfystatuscheck": False,
+    "vafStatus": None,
+    "SpecialAssistance": "",
+    "AdditionalRefNo": None,
+    "juridictionCode": "",
+    "canInitiateVAF": False,
+    "canEditVAF": False,
+    "canDeleteVAF": False,
+    "canDownloadVAF": False,
+    "Retryleft": "",
+    "ipAddress": "83.106.89.122",
 }
 
 TWILIO_CONFIG = {

@@ -1,11 +1,125 @@
 # browser_client.py
+import base64
 import json
 import os
+import socket
+import threading
 
 from seleniumbase import SB
 from seleniumbase.core import proxy_helper as _sb_proxy_helper
 
-from config import COUNTRY_CONFIG, PROXY_CONFIG
+from config import APPLICANT_CONFIG, COUNTRY_CONFIG, PROXY_CONFIG
+
+
+class LocalAuthProxy:
+    """
+    Minimal local HTTP/HTTPS forwarding proxy that injects Proxy-Authorization.
+
+    Chrome connects to 127.0.0.1:<local_port> with no credentials.
+    This proxy adds the auth header and forwards every request to the real
+    upstream proxy.  Chrome never receives a 407, so no auth dialog appears.
+    """
+
+    def __init__(self, remote_host: str, remote_port: int, username: str, password: str):
+        self.remote_host = remote_host
+        self.remote_port = remote_port
+        self._auth = "Basic " + base64.b64encode(
+            f"{username}:{password}".encode()
+        ).decode()
+        self._server: socket.socket | None = None
+        self.local_port: int = 0
+
+    def start(self):
+        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server.bind(("127.0.0.1", 0))
+        self.local_port = self._server.getsockname()[1]
+        self._server.listen(20)
+        t = threading.Thread(target=self._accept_loop, daemon=True)
+        t.start()
+        print(f"[LocalAuthProxy] Listening on 127.0.0.1:{self.local_port} → "
+              f"{self.remote_host}:{self.remote_port}")
+
+    def stop(self):
+        if self._server:
+            try:
+                self._server.close()
+            except Exception:
+                pass
+
+    def _accept_loop(self):
+        while True:
+            try:
+                client, _ = self._server.accept()
+                threading.Thread(
+                    target=self._handle, args=(client,), daemon=True
+                ).start()
+            except Exception:
+                break
+
+    @staticmethod
+    def _relay(src: socket.socket, dst: socket.socket):
+        try:
+            while True:
+                data = src.recv(8192)
+                if not data:
+                    break
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            for s in (src, dst):
+                try:
+                    s.close()
+                except Exception:
+                    pass
+
+    def _handle(self, client: socket.socket):
+        try:
+            raw = b""
+            while b"\r\n\r\n" not in raw:
+                chunk = client.recv(4096)
+                if not chunk:
+                    return
+                raw += chunk
+
+            sep = raw.index(b"\r\n\r\n")
+            headers_str = raw[:sep].decode("utf-8", errors="ignore")
+            body = raw[sep + 4:]
+
+            lines = headers_str.split("\r\n")
+            first_line = lines[0]
+
+            remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            remote.connect((self.remote_host, self.remote_port))
+
+            # Strip any existing auth header, inject ours
+            kept = [l for l in lines[1:] if not l.lower().startswith("proxy-authorization")]
+            kept.append(f"Proxy-Authorization: {self._auth}")
+
+            if first_line.upper().startswith("CONNECT"):
+                out = "\r\n".join([first_line] + kept) + "\r\n\r\n"
+                remote.sendall(out.encode())
+                # Wait for upstream 200 Connection established
+                resp = b""
+                while b"\r\n\r\n" not in resp:
+                    resp += remote.recv(4096)
+                client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                threading.Thread(
+                    target=self._relay, args=(remote, client), daemon=True
+                ).start()
+                self._relay(client, remote)
+            else:
+                out = "\r\n".join([first_line] + kept) + "\r\n\r\n"
+                remote.sendall(out.encode() + body)
+                self._relay(remote, client)
+        except Exception:
+            pass
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -117,23 +231,20 @@ class BrowserClient:
         self.country = country
         self.sb = None
         self._config = COUNTRY_CONFIG[country]
+        # VFS account email for the active country — used as `loginUser` when
+        # registering on a mission's appointment waiting list.
+        self.login_user: str | None = None
 
         print("[BrowserClient] ── Initialising BrowserClient ──")
         print(f"[BrowserClient]   country   : {country}")
         print("[BrowserClient]   UC mode   : True  (undetected Chrome, bypasses Cloudflare)")
-        print("[BrowserClient]   incognito : True  (forced via chromium_arg)")
+        print("[BrowserClient]   incognito : False")
         print(f"[BrowserClient]   headless  : {headless}")
-        print("[BrowserClient]   proxy     : disabled (temporarily commented out)")
+        print(f"[BrowserClient]   proxy     : {'enabled (local-forward)' if proxy else 'disabled'}")
 
-        # --incognito: SB's browser_launcher.py deliberately skips this flag when
-        # proxy_auth=True or extension_dir is set, because extensions are normally
-        # blocked in incognito.  We force it here via chromium_arg, combined with
-        # --allow-extensions-in-incognito so the proxy-auth extension still runs.
         chromium_args = [
             "--disable-software-rasterizer",
             "--disable-dev-shm-usage",
-            "--incognito",
-            "--allow-extensions-in-incognito",
         ]
 
         browser_params = {
@@ -142,22 +253,23 @@ class BrowserClient:
             "chromium_arg": ",".join(chromium_args),
         }
 
-        # --- PROXY TEMPORARILY DISABLED ---
-        # Re-enable by removing the `if False` wrapper below.
-        # if proxy:
-        #     proxy_str = PROXY_CONFIG["proxy"]
-        #     host_port = proxy_str.rsplit("@", 1)[-1]
-        #     print(f"[BrowserClient]   proxy host: {host_port}")
-        #     # Pass proxy= to SB so it runs through its full pipeline:
-        #     #   1. Parses user:pass@host:port
-        #     #   2. Calls our patched create_proxy_ext → writes MV2 extension
-        #     #      (sets chrome.proxy.settings AND handles onAuthRequired)
-        #     #   3. Adds --load-extension=<ext_dir> to chrome_options
-        #     #   4. Adds --proxy-server=<host:port> to chrome_options
-        #     browser_params["proxy"] = proxy_str
-        # else:
-        #     print("[BrowserClient] No proxy — connecting directly.")
-        print("[BrowserClient] Proxy disabled — connecting directly.")
+        self._local_proxy: LocalAuthProxy | None = None
+        if proxy:
+            proxy_str = PROXY_CONFIG["proxy"]
+            creds, host_port = proxy_str.rsplit("@", 1)
+            username, password = creds.split(":", 1)
+            remote_host, remote_port = host_port.rsplit(":", 1)
+            print(f"[BrowserClient]   remote proxy: {remote_host}:{remote_port}")
+            # Start local forwarding proxy — Chrome connects to localhost with no
+            # auth, LocalAuthProxy injects credentials and forwards to the real proxy.
+            # This eliminates the native proxy-auth dialog entirely.
+            self._local_proxy = LocalAuthProxy(
+                remote_host, int(remote_port), username, password
+            )
+            self._local_proxy.start()
+            browser_params["proxy"] = f"127.0.0.1:{self._local_proxy.local_port}"
+        else:
+            print("[BrowserClient] No proxy — connecting directly.")
 
         print("[BrowserClient] Final browser_params:")
         for k, v in browser_params.items():
@@ -183,7 +295,42 @@ class BrowserClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         print("[BrowserClient] __exit__ — closing browser...")
         self._sb_ctx.__exit__(exc_type, exc_val, exc_tb)
+        if self._local_proxy:
+            self._local_proxy.stop()
         print("[BrowserClient] Browser closed.")
+
+    def switch_country(self, new_country: str) -> None:
+        """
+        Update the active country and wipe all browser state so the previous
+        country's VFS session cannot bleed into the new one.
+        """
+        self.country = new_country
+        self._config = COUNTRY_CONFIG[new_country]
+        print(f"[BrowserClient] Switching to {new_country.upper()} — clearing session...")
+
+        # Navigate to a neutral page first (about:blank) so storage APIs don't
+        # throw cross-origin errors when we clear them.
+        try:
+            self.sb.open("about:blank")
+        except Exception:
+            pass
+
+        # Wipe cookies (all domains)
+        try:
+            self.sb.driver.delete_all_cookies()
+        except Exception:
+            pass
+
+        # Wipe localStorage and sessionStorage
+        try:
+            self.sb.execute_script(
+                "try { window.localStorage.clear(); } catch(e) {} "
+                "try { window.sessionStorage.clear(); } catch(e) {}"
+            )
+        except Exception:
+            pass
+
+        print(f"[BrowserClient] Session cleared. Ready for {new_country.upper()} login.")
 
     def open_login_page(self):
         # Visit the country home page first to establish the VFS session cookie.
@@ -274,16 +421,31 @@ class BrowserClient:
         # Angular SPAs need extra time to bootstrap and render the dashboard components.
         self.sb.sleep(5)
         current_url = self.sb.get_current_url()
-        self._log(f"  Page title: {self.sb.get_title()}")
+        page_title = self.sb.get_title()
+        self._log(f"  Page title: {page_title}")
         self._log(f"  Current URL: {current_url}")
 
-        # Session expired — VFS redirects the dashboard URL to /login.
-        # Raise immediately so the caller can handle re-authentication rather than
+        # Session expired — VFS redirects the dashboard URL to /login, appends a
+        # 401 to the URL, or renders a "session expired" message after too many
+        # requests. Raise immediately so the caller can re-authenticate rather than
         # accidentally clicking the login submit button (which is also button.mat-btn-lg).
-        if "/login" in current_url:
+        session_expired = (
+            "/login" in current_url
+            or "401" in current_url
+            or "401" in page_title.lower()
+        )
+        if not session_expired:
+            try:
+                if "session expired" in self.sb.get_page_source().lower():
+                    session_expired = True
+            except Exception:
+                pass
+
+        if session_expired:
             raise RuntimeError(
-                "SESSION_EXPIRED: dashboard redirected to /login — "
-                "VFS session has expired, re-authentication is required."
+                "SESSION_EXPIRED: dashboard redirected to /login or returned a "
+                "401/session-expired error — VFS session has expired, "
+                "re-authentication is required."
             )
 
         # Attempt 1: original mat-btn-lg selector with a generous timeout
@@ -357,7 +519,12 @@ class BrowserClient:
                 "Could not find 'Start New Booking' button on dashboard after all attempts."
             )
 
-        self.sb.sleep(3)
+        # Give Angular time to transition to /application-detail and render the form.
+        self.sb.sleep(8)
+        try:
+            self.sb.wait_for_element("#application-detail, mat-select", timeout=10)
+        except Exception:
+            pass
         self._log("Form ready (#application-detail).")
 
     def _ensure_on_form(self):
@@ -431,10 +598,12 @@ class BrowserClient:
             self._log(f"  _read_mat_options(#{select_id}): {e}")
         return options
 
-    def _submit_and_read_result(self) -> str:
+    def _submit_and_read_result(self) -> tuple[str, str]:
         """
-        Handle the captcha modal, click Submit, and return the outcome string.
-        Returns: "slots_available" | "no_slots" | "error"
+        Handle the captcha modal, click Submit, and return (result, slot_details).
+        result:      "slots_available" | "no_slots" | "error"
+        slot_details: text from the info banner, e.g.
+                      "Earliest available slot for 1 Applicants is : 10-06-2026"
         """
         try:
             self.sb.wait_for_element("app-cloudflare-dialog", timeout=10)
@@ -447,19 +616,44 @@ class BrowserClient:
         except Exception:
             self._log("  No captcha modal (auto-passed or not required).")
 
+        def _read_info_banner() -> str:
+            """Try every known selector for the result banner and return its text."""
+            for sel in (
+                'div[role="alert"].Information',
+                ".Information.alert",
+                "div.form-info",
+                ".Information .alert",
+            ):
+                els = self.sb.find_elements(sel)
+                if els:
+                    text = els[0].text.strip()
+                    if text:
+                        return text
+            return ""
+
+        # Wait for the result banner (covers both slots-available and no-slots states)
         try:
-            self.sb.wait_for_element(".Information .alert", timeout=8)
-            return "no_slots"
+            self.sb.wait_for_element(
+                'div[role="alert"].Information, .Information.alert, div.form-info',
+                timeout=10,
+            )
+            slot_details = _read_info_banner()
+            self._log(f"  Info banner: {slot_details!r}")
+            if "earliest available" in slot_details.lower():
+                return "slots_available", slot_details
+            return "no_slots", slot_details
         except Exception:
             pass
 
+        # Fallback: no banner — check for an enabled proceed button
         try:
             self.sb.wait_for_element("button.mat-btn-lg:not([disabled])", timeout=8)
-            return "slots_available"
+            slot_details = _read_info_banner()
+            return "slots_available", slot_details
         except Exception:
             pass
 
-        return "error"
+        return "error", ""
 
     # ------------------------------------------------------------------
     # Exhaustive combination scan
@@ -519,8 +713,12 @@ class BrowserClient:
         self._log(f"Found {len(centre_options)} centre(s): "
                   f"{[c['text'] for c in centre_options]}")
 
+        # Only London centres are in scope — skip Edinburgh, Manchester, etc.
+        centre_options = [c for c in centre_options if "london" in c["text"].lower()]
+        self._log(f"London centre(s) in scope: {[c['text'] for c in centre_options]}")
+
         if not centre_options:
-            self._log("ERROR: no centre options found — aborting.")
+            self._log("ERROR: no London centre options found — aborting.")
             return []
 
         appt_cats_by_centre: dict = {}
@@ -559,7 +757,7 @@ class BrowserClient:
 
                 # Tourist sub-category only
                 for sub_cat in sub_cats_by_centre.get(centre["id"], []):
-                    if sub_cat["text"].lower() == "tourist":
+                    if sub_cat["text"].lower() in ("tourist", "tourism"):
                         all_combos.append((centre, appt_cat, sub_cat))
 
         total = len(all_combos)
@@ -603,34 +801,74 @@ class BrowserClient:
                 self._select_mat_option("mat-select-1", sub_cat["id"])
                 self.sb.sleep(2)
 
-                result = self._submit_and_read_result()
+                result, slot_details = self._submit_and_read_result()
 
+            except RuntimeError as e:
+                if "SESSION_EXPIRED" in str(e):
+                    # Let this propagate — the caller restarts the whole scan for
+                    # this country with a fresh session.
+                    self._log(f"  SESSION EXPIRED mid-scan: {e}")
+                    raise
+                self._log(f"  EXCEPTION: {e}")
+                result, slot_details = "error", ""
             except Exception as e:
                 self._log(f"  EXCEPTION: {e}")
-                result = "error"
+                result, slot_details = "error", ""
 
             label = ("*** SLOTS AVAILABLE ***" if result == "slots_available"
                      else ("no slots" if result == "no_slots" else "ERROR"))
-            self._log(f"  RESULT [{idx}/{total}]: {label}")
+            detail_suffix = f" — {slot_details}" if slot_details else ""
+            self._log(f"  RESULT [{idx}/{total}]: {label}{detail_suffix}")
             results.append({
-                "combo":    idx,
-                "total":    total,
-                "centre":   centre,
-                "appt_cat": appt_cat,
-                "sub_cat":  sub_cat,
-                "result":   result,
+                "combo":       idx,
+                "total":       total,
+                "centre":      centre,
+                "appt_cat":    appt_cat,
+                "sub_cat":     sub_cat,
+                "result":      result,
+                "slot_details": slot_details,
             })
 
             if idx < total:
                 self.sb.sleep(delay_secs)
 
         slots_found = [r for r in results if r["result"] == "slots_available"]
+
+        # No direct slots anywhere — if this mission supports a waiting list,
+        # register the configured applicant on it.
+        if not slots_found and self._config.get("waitlist_enabled"):
+            if not self.login_user:
+                self._log("Waitlist enabled but no login_user set — skipping waitlist join.")
+            else:
+                self._log("No direct slots found — joining the waiting list...")
+                try:
+                    response = self.call_add_applicant()
+                    status = response.get("status")
+                    self._log(f"Waitlist join response: HTTP {status} — {response.get('body')}")
+                    joined = status in (200, 201)
+                    results.append({
+                        "combo": total + 1,
+                        "total": total,
+                        "centre": {"id": "", "text": self._config["vacCode"]},
+                        "appt_cat": {"id": "", "text": self._config["visaCategoryCode"]},
+                        "sub_cat": {"id": "", "text": "Waitlist"},
+                        "result": "waitlist_joined" if joined else "waitlist_failed",
+                        "slot_details": f"HTTP {status}: {response.get('body')}",
+                    })
+                except Exception as e:
+                    self._log(f"Waitlist join failed: {e}")
+
         self._log("=" * 55)
         self._log(f"SCAN COMPLETE — {len(slots_found)}/{total} combo(s) with slots available")
         if slots_found:
             for r in slots_found:
-                self._log(f"  *** AVAILABLE: {r['centre']['text']} / "
-                          f"{r['appt_cat']['text']} / {r['sub_cat']['text']}")
+                details = r.get("slot_details", "")
+                detail_suffix = f" | {details}" if details else ""
+                self._log(
+                    f"  *** AVAILABLE: {r['centre']['text']} / "
+                    f"{r['appt_cat']['text']} / {r['sub_cat']['text']}"
+                    + detail_suffix
+                )
         self._log("=" * 55)
         return results
 
@@ -686,7 +924,37 @@ class BrowserClient:
             pass
         return result
 
-    def call_add_applicant(self, login_user: str, jwt_token: str):
+    def call_add_applicant(self) -> dict:
+        """
+        Register the configured applicant (APPLICANT_CONFIG) on this mission's
+        appointment waiting list via POST /appointment/applicants with
+        isWaitlist=true. Used when no direct slots are found for a mission
+        that has 'waitlist_enabled' set in its COUNTRY_CONFIG entry.
+        """
+        cfg = self._config
+        jwt_token = self.get_auth_token()
+        route = f"{cfg['countryCode']}/en/{cfg['missionCode']}"
+
+        applicant = dict(APPLICANT_CONFIG)
+        applicant["loginUser"] = self.login_user
+
+        body = {
+            "countryCode": cfg["countryCode"],
+            "missionCode": cfg["missionCode"],
+            "centerCode": cfg["vacCode"],
+            "loginUser": self.login_user,
+            "visaCategoryCode": cfg["visaCategoryCode"],
+            "isEdit": False,
+            "feeEntryTypeCode": None,
+            "feeExemptionTypeCode": None,
+            "feeExemptionDetailsCode": None,
+            "applicantList": [applicant],
+            "languageCode": "en-US",
+            "isWaitlist": True,
+            "juridictionCode": None,
+            "regionCode": None,
+        }
+
         js_code = f"""
         const done = arguments[0];
         const url = 'https://lift-api.vfsglobal.com/appointment/applicants';
@@ -694,86 +962,9 @@ class BrowserClient:
           'accept': 'application/json, text/plain, */*',
           'content-type': 'application/json;charset=UTF-8',
           'authorize': {json.dumps(jwt_token)},
-          'route': 'gbr/en/nld'
+          'route': {json.dumps(route)}
         }};
-        const body = {{
-          countryCode: 'gbr',
-          missionCode: 'nld',
-          centerCode: 'NAKH',
-          loginUser: {json.dumps(login_user)},
-          visaCategoryCode: 'TA',
-          isEdit: false,
-          feeEntryTypeCode: null,
-          feeExemptionTypeCode: null,
-          feeExemptionDetailsCode: null,
-          applicantList: [{{
-            urn: '',
-            arn: '',
-            loginUser: {json.dumps(login_user)},
-            firstName: 'AHMAR',
-            employerFirstName: '',
-            middleName: '',
-            lastName: 'ALI',
-            employerLastName: '',
-            salutation: '',
-            gender: 1,
-            nationalId: null,
-            VisaToken: null,
-            employerContactNumber: '',
-            contactNumber: '07724267222',
-            dialCode: '44',
-            employerDialCode: '',
-            passportNumber: 'AX7653221',
-            confirmPassportNumber: null,
-            passportExpirtyDate: '05/08/2033',
-            dateOfBirth: '27/08/2025',
-            emailId: 'UMAR@GMAIL.COM',
-            employerEmailId: '',
-            nationalityCode: 'PAK',
-            state: 'HERTS',
-            city: 'WGC',
-            isEndorsedChild: false,
-            applicantType: 0,
-            addressline1: '31',
-            addressline2: '31',
-            pincode: null,
-            referenceNumber: null,
-            vlnNumber: null,
-            applicantGroupId: 0,
-            parentPassportNumber: '',
-            parentPassportExpiry: '',
-            dateOfDeparture: null,
-            entryType: '',
-            eoiVisaType: '',
-            passportType: '',
-            vfsReferenceNumber: '',
-            familyReunificationCerificateNumber: '',
-            PVRequestRefNumber: '',
-            PVStatus: '',
-            PVStatusDescription: '',
-            PVCanAllowRetry: true,
-            PVisVerified: false,
-            eefRegistrationNumber: '',
-            isAutoRefresh: true,
-            helloVerifyNumber: '',
-            OfflineCClink: '',
-            idenfystatuscheck: false,
-            vafStatus: null,
-            SpecialAssistance: '',
-            AdditionalRefNo: null,
-            juridictionCode: '',
-            canInitiateVAF: false,
-            canEditVAF: false,
-            canDeleteVAF: false,
-            canDownloadVAF: false,
-            Retryleft: '',
-            ipAddress: '83.106.89.122'
-          }}],
-          languageCode: 'en-US',
-          isWaitlist: true,
-          juridictionCode: null,
-          regionCode: null
-        }};
+        const body = {json.dumps(body)};
         fetch(url, {{
           method: 'POST',
           headers,
@@ -785,7 +976,6 @@ class BrowserClient:
           done(JSON.stringify({{
             status: r.status,
             statusText: r.statusText,
-            cfRay: r.headers.get('cf-ray'),
             body: text
           }}));
         }})
@@ -796,6 +986,6 @@ class BrowserClient:
         result = json.loads(raw) if isinstance(raw, str) else raw
         try:
             result["body"] = json.loads(result["body"])
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, KeyError):
             pass
         return result

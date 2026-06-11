@@ -1,21 +1,75 @@
 # main.py
-import time
-import itertools
 import json
 import os
 import threading
+import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Any
 
-from api_client import APIClient
 from auth_handler import AuthHandler
 from browser_client import BrowserClient
-from config import COUNTRY_CONFIG
 from notification_handler import SMSNotifier
 
+# ──────────────────────────────────────────────
+# Countries to scan — same credentials, different VFS destinations.
+# Add or remove entries here to change which countries are monitored.
+# ──────────────────────────────────────────────
+ACCOUNTS = [
+    ("dnk", "umar.jwork@gmail.com", "P@ssword123"), #Denmark
+    ("bgr", "umar.jwork@gmail.com", "P@ssword123"), #Bulgaria
+    ("svn", "umar.jwork@gmail.com", "P@ssword123"), #Slovenia
+    ("che", "umar.jwork@gmail.com", "P@ssword123"), #Switzerland
 
-def _keep_screen_awake():
-    """Move the mouse by 1 px every 30 s to prevent the screen from sleeping."""
+]
+
+# How long to wait between countries in the same cycle (seconds)
+BETWEEN_COUNTRY_WAIT = 90
+
+# How long to wait after all countries are done before the next full cycle (seconds)
+BETWEEN_CYCLE_WAIT = 180
+
+# Seconds between individual combo checks within a scan — kept generous to
+# avoid VFS rate-limiting / 401-session-expired errors from too-frequent requests
+COMBO_DELAY = 20
+
+# How long to wait before retrying a country after a session-expiry (401) error
+SESSION_RETRY_WAIT = 60
+
+# Max consecutive session-expiry retries for a single country before giving up
+# on it for this cycle and moving on to the next country
+MAX_SESSION_RETRIES = 5
+
+
+# ──────────────────────────────────────────────
+# Utilities
+# ──────────────────────────────────────────────
+
+def _human_wait(seconds: int, reason: str = "") -> None:
+    """Sleep for `seconds` while jiggling the mouse every 15 s."""
+    label = f" — {reason}" if reason else ""
+    mins, secs = divmod(seconds, 60)
+    print(f"[VfsScraper] Waiting {mins}m {secs:02d}s{label}...")
+    try:
+        import pyautogui
+        pyautogui.FAILSAFE = False
+        deadline = time.time() + seconds
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            try:
+                x, y = pyautogui.position()
+                pyautogui.moveTo(x + 2, y + 1, duration=0.15)
+                pyautogui.moveTo(x,     y,     duration=0.15)
+            except Exception:
+                pass
+            time.sleep(min(15, remaining))
+    except ImportError:
+        time.sleep(seconds)
+
+
+def _keep_screen_awake() -> None:
+    """Background thread: nudge the mouse every 30 s to prevent sleep."""
     try:
         import pyautogui
         pyautogui.FAILSAFE = False
@@ -23,177 +77,241 @@ def _keep_screen_awake():
             try:
                 x, y = pyautogui.position()
                 pyautogui.moveTo(x + 1, y + 1, duration=0.1)
-                pyautogui.moveTo(x, y, duration=0.1)
+                pyautogui.moveTo(x,     y,     duration=0.1)
             except Exception:
                 pass
             time.sleep(30)
     except ImportError:
-        # pyautogui not available — fall back to xdotool if present
-        import subprocess
-        while True:
-            try:
-                subprocess.run(
-                    ["xdotool", "mousemove_relative", "--", "1", "0"],
-                    capture_output=True, check=False
-                )
-                time.sleep(0.3)
-                subprocess.run(
-                    ["xdotool", "mousemove_relative", "--", "-1", "0"],
-                    capture_output=True, check=False
-                )
-            except Exception:
-                pass
-            time.sleep(30)
+        pass
 
+
+# ──────────────────────────────────────────────
+# Main scraper
+# ──────────────────────────────────────────────
 
 class VfsScraper:
-    def __init__(self, country, email, password, persist_session=True):
-        self.country = country
-        self.email = email
-        self.password = password
-        self.config = COUNTRY_CONFIG[country]
+    def __init__(self, accounts: list[tuple[str, str, str]]) -> None:
+        self.accounts = accounts          # [(country, email, password), ...]
         self.notifier = SMSNotifier()
-        self.auth_token = None
-        self.start_time = time.time()
-        self.max_runtime = 30 * 60  # seconds
-        self.persist_session = persist_session
-        self.max_retries = 3
-        self.retry_count = 0
-        self.session_valid = True
-        
-        # Create logs directory
         os.makedirs("logs", exist_ok=True)
-        self.log_file = f"logs/{country}_appointments_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        
-    def log_appointment_data(self, data: Dict[str, Any]):
-        """Log appointment data to file"""
+        self._log_file = (
+            f"logs/multi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        )
+
+    # ── logging ──────────────────────────────
+
+    def _log(self, data: dict[str, Any]) -> None:
         try:
-            with open(self.log_file, "a") as f:
-                log_entry = {
-                    "timestamp": datetime.now().isoformat(),
-                    "email": self.email,
-                    "country": self.country,
-                    "data": data
-                }
-                f.write(json.dumps(log_entry) + "\n")
+            with open(self._log_file, "a") as f:
+                f.write(json.dumps({"ts": datetime.now().isoformat(), **data}) + "\n")
         except Exception as e:
-            print(f"Error logging appointment data: {e}")
+            print(f"[VfsScraper] Log error: {e}")
 
-    def start_monitoring(self):
-        with BrowserClient(self.country, proxy=True) as browser:
-            print(f"[VfsScraper] Browser launched. Navigating to VFS login page...")
+    # ── per-country scan ─────────────────────
 
-            # Always open the login page first — this is what loads the VFS URL.
-            # Checking get_auth_token() before any navigation returns nothing useful.
-            auth = AuthHandler(self.country, self.email, self.password, browser)
-            self.auth_token = auth.authenticate()
+    def _scan_country(
+        self,
+        browser: BrowserClient,
+        country: str,
+        email: str,
+        password: str,
+    ) -> list[dict] | None:
+        """
+        Log in to `country` and return all combo results tagged with country.
 
-            if self.auth_token is None:
-                print("[VfsScraper] Authentication failed — no JWT obtained. Exiting.")
-                return
+        Returns `None` if the VFS session expired mid-scan (401 / redirected to
+        login) — the caller should retry this same country with a fresh session.
+        Returns `[]` for auth failures or other non-recoverable scan errors.
+        """
+        browser.switch_country(country)
+        browser.login_user = email
 
-            print(f"[VfsScraper] Authenticated. JWT length={len(self.auth_token)}.")
-            browser.sb.sleep(3)
+        auth = AuthHandler(country, email, password, browser)
+        token = auth.authenticate()
+        if token is None:
+            print(f"[VfsScraper] Auth failed for {country.upper()} — skipping.")
+            return []
 
-            print(f"[VfsScraper] Starting slot monitoring for {self.country} / {self.email}")
-            print(f"[VfsScraper] Max runtime: {self.max_runtime // 60} minutes")
+        print(f"[VfsScraper] Authenticated for {country.upper()}. JWT length={len(token)}.")
+        browser.sb.sleep(3)
 
-            while True:
-                if time.time() - self.start_time > self.max_runtime:
-                    print("[VfsScraper] 30-minute limit reached. Exiting.")
-                    return
+        try:
+            results = browser.check_all_combinations(delay_secs=COMBO_DELAY)
+        except RuntimeError as e:
+            msg = str(e)
+            if "SESSION_EXPIRED" in msg:
+                print(f"[VfsScraper] Session expired mid-scan for {country.upper()}.")
+                return None
+            print(f"[VfsScraper] Scan error for {country.upper()}: {e}")
+            return []
 
-                try:
-                    # Test every (centre × appt_category × sub_category) combination
-                    # with a 5-second pause between each.
-                    results = browser.check_all_combinations(delay_secs=5)
+        self._log({"country": country, "type": "scan", "results": results})
 
-                    self.log_appointment_data({
-                        "type": "combo_scan",
-                        "results": results,
-                    })
+        # Tag each result with its country and send SMS for available slots.
+        for r in results:
+            r["country"] = country
 
-                    slots_found = [r for r in results if r["result"] == "slots_available"]
-                    errors      = [r for r in results if r["result"] == "error"]
-
-                    if slots_found:
-                        for r in slots_found:
-                            msg = (
-                                f"VFS {self.country.upper()} SLOT AVAILABLE: "
-                                f"{r['centre']['text']} / "
-                                f"{r['appt_cat']['text']} / "
-                                f"{r['sub_cat']['text']}"
-                            )
-                            print(f"[VfsScraper] {msg}")
-                            self.notifier.send_sms(msg)
-                        # Pause for 30 min so user can act before re-scanning
-                        print("[VfsScraper] Waiting 30 min before next full scan.")
-                        time.sleep(1800)
-
-                    elif errors and len(errors) == len(results):
-                        # Every single combo errored — likely session/page problem
-                        print("[VfsScraper] All combos returned error — retrying in 60 s.")
-                        self.retry_count += 1
-                        if self.retry_count >= self.max_retries:
-                            print("[VfsScraper] Max retries reached. Exiting.")
-                            return
-                        time.sleep(60)
-
-                    else:
-                        print(f"[VfsScraper] Scan done — no slots. "
-                              f"Waiting 150 s before next full scan.")
-                        time.sleep(150)
-
-                except RuntimeError as e:
-                    if "SESSION_EXPIRED" in str(e):
-                        print(f"[VfsScraper] Session expired mid-scan — exiting to re-authenticate. ({e})")
-                        return
-                    print(f"[VfsScraper] Monitoring error: {e}")
-                    self.log_appointment_data({"type": "error", "error": str(e)})
-                    self.retry_count += 1
-                    if self.retry_count >= self.max_retries:
-                        print("[VfsScraper] Max retries reached due to errors. Exiting.")
-                        return
-                    time.sleep(60)
-                except Exception as e:
-                    print(f"[VfsScraper] Monitoring error: {e}")
-                    self.log_appointment_data({"type": "error", "error": str(e)})
-                    self.retry_count += 1
-                    if self.retry_count >= self.max_retries:
-                        print("[VfsScraper] Max retries reached due to errors. Exiting.")
-                        return
-                    time.sleep(60)
-
-    def _handle_available_slot(self, city=None, date_str=None, waitlist=False):
-        if waitlist:
-            self.notifier.send_sms("VFS Appointments waitlist Open")
-        else:
-            self.notifier.send_sms(
-                f"VFS Appointments {self.country} {city} earliestDate {date_str} available"
+        slots = [r for r in results if r["result"] == "slots_available"]
+        for r in slots:
+            details = r.get("slot_details", "")
+            msg = (
+                f"VFS {country.upper()} SLOT AVAILABLE: "
+                f"{r['centre']['text']} / "
+                f"{r['appt_cat']['text']} / "
+                f"{r['sub_cat']['text']}"
             )
+            if details:
+                msg += f" | {details}"
+            print(f"[VfsScraper] {msg}")
+            self.notifier.send_sms(msg)
 
+        for r in [r for r in results if r["result"] == "waitlist_joined"]:
+            msg = (
+                f"VFS {country.upper()} WAITLIST JOINED: "
+                f"{r['centre']['text']} / {r['appt_cat']['text']}"
+            )
+            print(f"[VfsScraper] {msg}")
+            self.notifier.send_sms(msg)
+
+        return results
+
+    # ── summary table ─────────────────────────
+
+    @staticmethod
+    def _print_summary(all_results: list[dict]) -> None:
+        all_slots = [r for r in all_results if r["result"] == "slots_available"]
+        waitlisted = [
+            r for r in all_results
+            if r["result"] in ("waitlist_joined", "waitlist_failed")
+        ]
+
+        w_country  = 8
+        w_centre   = 44
+        w_cat      = 18
+        w_date     = 28
+        total_w    = w_country + w_centre + w_cat + w_date + 6  # separators
+
+        bar = "=" * total_w
+        print(f"\n{bar}")
+        print(f"  CONSOLIDATED RESULTS — {len(all_slots)} slot(s) across all countries")
+        print(bar)
+
+        if not all_slots:
+            print("  No slots available across any country.")
+        else:
+            hdr = (
+                f"  {'Country':<{w_country}} "
+                f"{'Centre':<{w_centre}} "
+                f"{'Sub-Category':<{w_cat}} "
+                f"{'Earliest Date':<{w_date}}"
+            )
+            print(hdr)
+            print("  " + "-" * (total_w - 2))
+
+            for r in all_slots:
+                country_str = r.get("country", "???").upper()
+                centre      = r["centre"]["text"][:w_centre]
+                sub_cat     = r["sub_cat"]["text"][:w_cat]
+                details     = r.get("slot_details", "")
+                # Extract just the date portion after "is :" if present
+                if "is :" in details:
+                    date_str = details.split("is :")[-1].strip()
+                else:
+                    date_str = details[:w_date] if details else "—"
+
+                print(
+                    f"  {country_str:<{w_country}} "
+                    f"{centre:<{w_centre}} "
+                    f"{sub_cat:<{w_cat}} "
+                    f"{date_str:<{w_date}}"
+                )
+
+        if waitlisted:
+            print(f"\n  Waitlist registrations ({len(waitlisted)}):")
+            for r in waitlisted:
+                status = "JOINED" if r["result"] == "waitlist_joined" else "FAILED"
+                country_str = r.get("country", "???").upper()
+                print(
+                    f"    {country_str}: {r['centre']['text']} / "
+                    f"{r['appt_cat']['text']} — {status}"
+                )
+
+        print(f"{bar}\n")
+
+    # ── main loop ─────────────────────────────
+
+    def start_monitoring(self) -> None:
+        cycle = 0
+
+        while True:
+            cycle += 1
+            n = len(self.accounts)
+            print(f"\n[VfsScraper] {'=' * 50}")
+            print(f"[VfsScraper]  CYCLE {cycle}  —  {n} country/countries")
+            print(f"[VfsScraper] {'=' * 50}")
+
+            all_results: list[dict] = []
+
+            # Single browser session for the whole cycle
+            with BrowserClient(self.accounts[0][0], proxy=True) as browser:
+                for idx, (country, email, password) in enumerate(self.accounts):
+                    print(
+                        f"\n[VfsScraper] ── Country {idx + 1}/{n}: "
+                        f"{country.upper()} ──"
+                    )
+
+                    # Retry the SAME country (fresh session) on a 401/session
+                    # expiry, instead of skipping it or restarting the cycle.
+                    retries = 0
+                    while True:
+                        results = self._scan_country(browser, country, email, password)
+                        if results is not None:
+                            break
+                        retries += 1
+                        if retries > MAX_SESSION_RETRIES:
+                            print(
+                                f"[VfsScraper] {country.upper()} hit session "
+                                f"expiry {retries - 1}x in a row — giving up "
+                                "on it for this cycle."
+                            )
+                            results = []
+                            break
+                        print(
+                            f"[VfsScraper] Restarting {country.upper()} with a "
+                            f"fresh session (attempt {retries + 1})..."
+                        )
+                        _human_wait(
+                            SESSION_RETRY_WAIT,
+                            f"before re-authenticating {country.upper()}",
+                        )
+
+                    all_results.extend(results)
+
+                    # Wait between countries (skip after the last one)
+                    if idx < n - 1:
+                        next_country = self.accounts[idx + 1][0].upper()
+                        _human_wait(
+                            BETWEEN_COUNTRY_WAIT,
+                            f"before switching to {next_country}",
+                        )
+
+            # Consolidated summary across all countries
+            self._print_summary(all_results)
+
+            # Wait before next full cycle
+            _human_wait(BETWEEN_CYCLE_WAIT, "before next full cycle")
+
+
+# ──────────────────────────────────────────────
+# Entry point
+# ──────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # DNK (Denmark) account — OTP arrives at Gmail inbox
-    accounts = [
-        ("dnk", "umar.jwork@gmail.com", "P@ssword123"),
-    ]
-
-    # BGR (Bulgaria) — commented out, switch back by swapping the accounts list above
-    # accounts = [
-    #     ("bgr", "umar.jwork@gmail.com", "P@ssword123"),
-    # ]
-
-    # Keep screen awake during long browser sessions
-    mouse_thread = threading.Thread(target=_keep_screen_awake, daemon=True)
-    mouse_thread.start()
+    threading.Thread(target=_keep_screen_awake, daemon=True).start()
     print("Screen-awake thread started.")
-    print("VFS Appointment Scraper - GBR -> DNK (Denmark)")
+    print("VFS Appointment Scraper — multi-country")
+    print("=" * 50)
+    print(f"Countries: {', '.join(c.upper() for c, _, _ in ACCOUNTS)}")
     print("=" * 50)
 
-    for country, email, password in itertools.cycle(accounts):
-        print(f"\n=== Starting session for {email} ({country.upper()}) ===")
-        scraper = VfsScraper(country, email, password)
-        scraper.start_monitoring()
-        print(f"=== Finished session for {email} — pausing 60 s ===")
-        time.sleep(60)
+    VfsScraper(ACCOUNTS).start_monitoring()
