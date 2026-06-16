@@ -219,11 +219,15 @@ class VfsScraper:
                 else:
                     date_str = details[:w_date] if details else "—"
 
+                booking_status = r.get("booking_status", "")
+                booking_suffix = f"  [BOOKING: {booking_status.upper()}]" if booking_status else ""
+
                 print(
                     f"  {country_str:<{w_country}} "
                     f"{centre:<{w_centre}} "
                     f"{sub_cat:<{w_cat}} "
                     f"{date_str:<{w_date}}"
+                    f"{booking_suffix}"
                 )
 
         if waitlisted:

@@ -307,11 +307,19 @@ class BrowserClient:
         self.country = new_country
         self._config = COUNTRY_CONFIG[new_country]
         print(f"[BrowserClient] Switching to {new_country.upper()} — clearing session...")
+        self._log_state(f"Before clearing session (switching to {new_country.upper()})")
 
-        # Navigate to a neutral page first (about:blank) so storage APIs don't
-        # throw cross-origin errors when we clear them.
+        # Wipe localStorage and sessionStorage *while still on the
+        # visa.vfsglobal.com origin*. The Angular SPA persists state there
+        # (e.g. the last-visited mission code) — if we navigate to about:blank
+        # first, clear() runs against about:blank's origin instead and is a
+        # no-op, so the stale mission state survives and the new country's
+        # /dashboard route silently redirects back to the previous country.
         try:
-            self.sb.open("about:blank")
+            self.sb.execute_script(
+                "try { window.localStorage.clear(); } catch(e) {} "
+                "try { window.sessionStorage.clear(); } catch(e) {}"
+            )
         except Exception:
             pass
 
@@ -321,15 +329,14 @@ class BrowserClient:
         except Exception:
             pass
 
-        # Wipe localStorage and sessionStorage
+        # Now navigate to a neutral page so no leftover Angular app/router
+        # state remains in memory before the next login flow begins.
         try:
-            self.sb.execute_script(
-                "try { window.localStorage.clear(); } catch(e) {} "
-                "try { window.sessionStorage.clear(); } catch(e) {}"
-            )
+            self.sb.open("about:blank")
         except Exception:
             pass
 
+        self._log_state(f"After clearing session — ready for {new_country.upper()}")
         print(f"[BrowserClient] Session cleared. Ready for {new_country.upper()} login.")
 
     def open_login_page(self):
@@ -340,6 +347,7 @@ class BrowserClient:
         print(f"[BrowserClient] Warming up session via home page: {home_url}")
         self.sb.open(home_url)
         self.sb.sleep(3)
+        self._log_state("After opening home page")
 
         url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
         print(f"[BrowserClient] Opening login page: {url}")
@@ -351,6 +359,7 @@ class BrowserClient:
         except Exception:
             print("[BrowserClient] #email not found after 15s — sleeping 10s more...")
             self.sb.sleep(10)
+        self._log_state("After opening login page")
         print("[BrowserClient] Login page loaded.")
 
     def handle_cookies(self):
@@ -386,6 +395,23 @@ class BrowserClient:
 
     def get_auth_token(self):
         return self.sb.execute_script("return sessionStorage.getItem('JWT');")
+
+    def _log_state(self, action: str) -> None:
+        """
+        Log a description of the action being performed together with the
+        browser's current URL and page title — gives full visibility into
+        what the automation is doing and where it currently is in the
+        browser, for diagnosing session/redirect issues.
+        """
+        try:
+            url = self.sb.get_current_url()
+        except Exception:
+            url = "<unknown>"
+        try:
+            title = self.sb.get_title()
+        except Exception:
+            title = "<unknown>"
+        self._log(f"  [STATE] {action} | url={url} | title={title!r}")
 
     def switch_tabs(self):
         self.sb.click("#mat-select-0", scroll=True)
@@ -426,26 +452,33 @@ class BrowserClient:
         self._log(f"  Current URL: {current_url}")
 
         # Session expired — VFS redirects the dashboard URL to /login, appends a
-        # 401 to the URL, or renders a "session expired" message after too many
-        # requests. Raise immediately so the caller can re-authenticate rather than
-        # accidentally clicking the login submit button (which is also button.mat-btn-lg).
+        # 401 to the URL, sends us to /page-not-found (its rate-limit/expired-
+        # session error page), or renders a "session expired" message after too
+        # many requests. Raise immediately so the caller can re-authenticate
+        # rather than accidentally clicking the login submit button (which is
+        # also button.mat-btn-lg).
+        current_url_lower = current_url.lower()
+        page_title_lower = page_title.lower()
         session_expired = (
-            "/login" in current_url
-            or "401" in current_url
-            or "401" in page_title.lower()
+            "/login" in current_url_lower
+            or "401" in current_url_lower
+            or "page-not-found" in current_url_lower
+            or "401" in page_title_lower
+            or "page not found" in page_title_lower
         )
         if not session_expired:
             try:
-                if "session expired" in self.sb.get_page_source().lower():
+                page_source_lower = self.sb.get_page_source().lower()
+                if "session expired" in page_source_lower or "page not found" in page_source_lower:
                     session_expired = True
             except Exception:
                 pass
 
         if session_expired:
             raise RuntimeError(
-                "SESSION_EXPIRED: dashboard redirected to /login or returned a "
-                "401/session-expired error — VFS session has expired, "
-                "re-authentication is required."
+                f"SESSION_EXPIRED: dashboard redirected to {current_url!r} "
+                "(/login, 401, or page-not-found) — VFS session has expired "
+                "or rate-limited the request, re-authentication is required."
             )
 
         # Attempt 1: original mat-btn-lg selector with a generous timeout
@@ -526,6 +559,7 @@ class BrowserClient:
         except Exception:
             pass
         self._log("Form ready (#application-detail).")
+        self._log_state("After clicking 'Start New Booking'")
 
     def _ensure_on_form(self):
         """
@@ -558,6 +592,7 @@ class BrowserClient:
                 self.sb.wait_for_element(panel_sel, timeout=15)
                 self.sb.driver.uc_click(panel_sel)
                 self.sb.sleep(1)
+                self._log_state(f"After selecting #{select_id} → '{option_id}'")
                 return
             except Exception as exc:
                 if attempt == 0:
@@ -616,6 +651,8 @@ class BrowserClient:
         except Exception:
             self._log("  No captcha modal (auto-passed or not required).")
 
+        self._log_state("After submit / captcha handling")
+
         def _read_info_banner() -> str:
             """Try every known selector for the result banner and return its text."""
             for sel in (
@@ -654,6 +691,162 @@ class BrowserClient:
             pass
 
         return "error", ""
+
+    # ------------------------------------------------------------------
+    # Interactive booking — "Your Details" (Applicant Details) step
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _prompt_yes_no(prompt: str, default: bool = False) -> bool:
+        """Blocking console y/n prompt. Empty input falls back to `default`."""
+        suffix = " [Y/n]: " if default else " [y/N]: "
+        while True:
+            try:
+                ans = input(prompt + suffix).strip().lower()
+            except EOFError:
+                return default
+            if not ans:
+                return default
+            if ans in ("y", "yes"):
+                return True
+            if ans in ("n", "no"):
+                return False
+            print("  Please answer 'yes' or 'no'.")
+
+    @staticmethod
+    def _prompt_value(label: str, default: str = "") -> str:
+        """Blocking console prompt for a text value. Press Enter to accept the default."""
+        suffix = f" [{default}]" if default else ""
+        while True:
+            try:
+                val = input(f"  {label}{suffix}: ").strip()
+            except EOFError:
+                val = ""
+            if val:
+                return val
+            if default:
+                return default
+            print("  This field is required.")
+
+    def _click_button_by_text(self, texts: list[str], scope_selector: str | None = None) -> bool:
+        """
+        Click the first visible, enabled <button> whose trimmed text exactly matches
+        (case-insensitive) one of `texts`, tried in order. Optionally restrict the
+        search to descendants of `scope_selector`. Returns True if a button was clicked.
+        """
+        scope_js = json.dumps(scope_selector) if scope_selector else "null"
+        wanted_js = json.dumps([t.lower() for t in texts])
+        js = f"""
+        const scopeSel = {scope_js};
+        const container = scopeSel ? document.querySelector(scopeSel) : document;
+        if (!container) return false;
+        const wanted = {wanted_js};
+        const buttons = Array.from(container.querySelectorAll('button'));
+        for (const want of wanted) {{
+            const btn = buttons.find(b => {{
+                if (b.disabled || b.hidden) return false;
+                const label = (b.innerText || '').trim().toLowerCase();
+                return label === want;
+            }});
+            if (btn) {{ btn.click(); return true; }}
+        }}
+        return false;
+        """
+        return bool(self.sb.execute_script(js))
+
+    def _fill_text_field(self, selector: str, value: str, label: str = "") -> None:
+        """Scroll to, focus, clear, and type `value` into the input matching `selector`."""
+        self._log(f"  Filling {label or selector!r} = {value!r}")
+        self.sb.wait_for_element(selector, timeout=10)
+        self.sb.scroll_to(selector)
+        self.sb.type(selector, value)
+        self.sb.sleep(0.3)
+
+    def book_appointment(self) -> bool:
+        """
+        After a 'slots_available' result on the Application Detail page, click
+        through to the 'Your Details' (Applicant Details) step, prompt the user
+        in the console for the required fields, fill them in, then Save or Cancel
+        based on the user's confirmation.
+
+        Returns True if the form was submitted (Save clicked), False if the user
+        declined to save or the page didn't transition as expected.
+        """
+        self._log("  Proceeding to 'Your Details' step...")
+        self.sb.sleep(2)
+
+        clicked = self._click_button_by_text(
+            ["continue", "proceed", "next", "book appointment", "book now", "book"]
+        )
+        if not clicked:
+            try:
+                self.sb.driver.uc_click("button.mat-btn-lg:not([disabled])")
+                clicked = True
+            except Exception:
+                pass
+
+        if not clicked:
+            self._log("  Could not find a Continue/Proceed button — aborting booking.")
+            self._log_state("Continue/Proceed button not found")
+            return False
+
+        self.sb.sleep(5)
+        self._log_state("After clicking Continue/Proceed")
+        try:
+            self.sb.wait_for_element("app-applicant-details", timeout=15)
+        except Exception:
+            self._log("  'Your Details' page did not load — aborting booking.")
+            return False
+
+        self._log("  'Your Details' page loaded.")
+
+        print("\n" + "=" * 55)
+        print("  BOOKING — Applicant Details")
+        print("  Press Enter to accept the default shown in [brackets].")
+        print("=" * 55)
+
+        cfg = APPLICANT_CONFIG
+        cover_letter_id = self._prompt_value("Cover Letter ID")
+        first_name      = self._prompt_value("First Name", cfg.get("firstName", ""))
+        last_name       = self._prompt_value("Last Name", cfg.get("lastName", ""))
+        passport_number = self._prompt_value("Passport Number", cfg.get("passportNumber", ""))
+        dial_code       = self._prompt_value("Contact dial code", cfg.get("dialCode", ""))
+        contact_number  = self._prompt_value("Contact number", cfg.get("contactNumber", ""))
+        email           = self._prompt_value("Email", cfg.get("emailId", ""))
+
+        fields = [
+            ('app-applicant-details input[placeholder="Enter Cover Letter ID"]', cover_letter_id, "Cover Letter ID"),
+            ('app-applicant-details input[placeholder="Enter your first name"]', first_name, "First Name"),
+            ('app-applicant-details input[placeholder="Please enter last name."]', last_name, "Last Name"),
+            ('app-applicant-details input[placeholder="Enter passport number"]', passport_number, "Passport Number"),
+            ('app-applicant-details input[placeholder="44"]', dial_code, "Dial Code"),
+            ('app-applicant-details input[placeholder="012345648382"]', contact_number, "Contact Number"),
+            ('app-applicant-details input[placeholder="Enter Email Address"]', email, "Email"),
+        ]
+
+        for selector, value, label in fields:
+            try:
+                self._fill_text_field(selector, value, label)
+            except Exception as e:
+                self._log(f"  Could not fill {label} ({selector}): {e}")
+
+        print("\nReview the values entered above against the form in the browser.")
+        if not self._prompt_yes_no("Click SAVE to continue the booking?"):
+            self._log("  User declined to save — clicking Cancel.")
+            self._click_button_by_text(["cancel"], scope_selector="app-applicant-details")
+            self.sb.sleep(2)
+            self._log_state("After clicking Cancel")
+            return False
+
+        self._log("  Clicking Save...")
+        if not self._click_button_by_text(["save"], scope_selector="app-applicant-details"):
+            self._log("  Could not find the Save button.")
+            return False
+
+        self.sb.sleep(5)
+        self._log("  Save clicked — booking form submitted.")
+        self._log_state("After clicking Save")
+        return True
 
     # ------------------------------------------------------------------
     # Exhaustive combination scan
@@ -828,6 +1021,33 @@ class BrowserClient:
                 "result":      result,
                 "slot_details": slot_details,
             })
+
+            # A slot is available — pause and let the user decide whether to
+            # book it now via the console.
+            booking_initiated = False
+            if result == "slots_available":
+                print("\n" + "=" * 55)
+                print(f"*** SLOT AVAILABLE: {centre['text']} / {appt_cat['text']} "
+                      f"/ {sub_cat['text']} ***")
+                if slot_details:
+                    print(f"    {slot_details}")
+                print("=" * 55)
+                if self._prompt_yes_no("Proceed with booking this slot?"):
+                    try:
+                        booking_initiated = self.book_appointment()
+                    except Exception as e:
+                        self._log(f"  Booking error: {e}")
+                    results[-1]["booking_status"] = (
+                        "initiated" if booking_initiated else "cancelled"
+                    )
+                else:
+                    self._log("  Booking skipped by user.")
+                    results[-1]["booking_status"] = "skipped"
+
+            if booking_initiated:
+                self._log("  Booking in progress — stopping combination scan "
+                          "for this country.")
+                break
 
             if idx < total:
                 self.sb.sleep(delay_secs)

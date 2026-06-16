@@ -16,6 +16,7 @@ class AuthHandler:
 
         if self.browser.check_is_ip_blocked():
             print("[AuthHandler] IP is blocked — aborting authentication.")
+            self.browser._log_state("Authentication aborted — IP blocked")
             return None
 
         print("[AuthHandler] IP not blocked. Handling cookie banner...")
@@ -23,13 +24,16 @@ class AuthHandler:
         print("[AuthHandler] Entering credentials...")
         self._enter_credentials()
         print("[AuthHandler] Credentials submitted. Checking for IP block after login...")
+        self.browser._log_state("After submitting credentials")
 
         if self.browser.check_is_ip_blocked():
             print("[AuthHandler] IP blocked after credential entry — aborting.")
+            self.browser._log_state("Authentication aborted — IP blocked after credentials")
             return None
 
         print("[AuthHandler] No IP block. Waiting for OTP prompt and fetching OTP from email...")
         self._submit_otp(email=self.email)
+        self.browser._log_state("After OTP submission")
         try:
             self.browser.sb.sleep(3)
             print("[AuthHandler] Reading JWT from sessionStorage...")
