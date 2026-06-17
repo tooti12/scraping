@@ -161,3 +161,26 @@ GMAIL_CONFIG = {
 PROXY_CONFIG = {
     "proxy": "user-v12T4mAL03J9HGfz-type-residential-session-av7gkchx-country-gb-rotation-0:Kv72bsFi3VQh7f0N@geo.g-w.info:10080",
 }
+
+# Consolidated from the duplicate blobs previously hardcoded in
+# browser_client.py's call_add_applicant() and waitlist.json (which
+# disagreed on passport number/DOB/email between the two copies).
+# Sourced from waitlist.json as the more complete record - verify every
+# field against your actual passport/ID before relying on this for a real
+# booking. `gender` is the dropdown's visible option text, not VFS's
+# numeric code (1) - confirm "Male" is correct for the UI before use.
+APPLICANT_CONFIG = {
+    "vfs@thesemantics.co": {
+        "cover_letter_id": "",
+        "first_name": "AHMAR",
+        "last_name": "ALI",
+        "gender": "Male",
+        "date_of_birth": "09/08/1995",
+        "current_nationality": "PAKISTAN",
+        "passport_number": "EK1812233",
+        "passport_expiry_date": "03/09/2031",
+        "contact_dial_code": "44",
+        "contact_number": "07724267222",
+        "email": "UMARJAVED56@GMAIL.COM",
+    },
+}

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from auth_handler import AuthHandler
+from booking_flow import BookingFlow
 from browser_client import BrowserClient
 from notification_handler import SMSNotifier
 
@@ -317,5 +318,12 @@ if __name__ == "__main__":
     print("=" * 50)
     print(f"Countries: {', '.join(c.upper() for c, _, _ in ACCOUNTS)}")
     print("=" * 50)
+
+    bridge = FrontendBridge()
+    dashboard_thread = threading.Thread(
+        target=run_dashboard, args=(bridge,), daemon=True
+    )
+    dashboard_thread.start()
+    print("🖥️  Dashboard running at http://127.0.0.1:5050")
 
     VfsScraper(ACCOUNTS).start_monitoring()

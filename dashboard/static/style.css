@@ -1,0 +1,71 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 720px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #1a1a1a;
+}
+
+h1 {
+  font-size: 1.4rem;
+}
+
+.muted {
+  color: #777;
+}
+
+#prompt-section {
+  margin-bottom: 2rem;
+}
+
+.prompt-box {
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #fafafa;
+}
+
+.prompt-box h3 {
+  margin-top: 0;
+}
+
+.prompt-box button {
+  margin: 0.25rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid #888;
+  background: #fff;
+  cursor: pointer;
+}
+
+.prompt-box button:hover {
+  background: #eee;
+}
+
+.prompt-box form label {
+  display: block;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.prompt-box form input {
+  display: block;
+  width: 100%;
+  padding: 0.4rem;
+  margin-top: 0.2rem;
+  box-sizing: border-box;
+}
+
+#status-list {
+  list-style: none;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+#status-list li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #eee;
+}
