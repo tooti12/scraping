@@ -31,18 +31,28 @@ from slot_check_service import check_country_slot
 
 _COUNTRY_CODES = {c["code"] for c in COUNTRIES}
 
+# Hard ceiling on a single check. A normal run (login + OTP wait + reading
+# the form) takes a few minutes; this is a generous multiple of that. It
+# exists purely as a watchdog — if something inside the automation blocks
+# forever with no timeout of its own (an unsolved captcha modal, a wait
+# that never resolves), this is what stops the frontend from being stuck on
+# "Checking..." forever with no way to know the bot is actually wedged.
+CHECK_TIMEOUT_SECONDS = 240
+
 
 def create_app(bridge):
     app = Flask(__name__)
     app.config["bridge"] = bridge
 
-    # check_id -> queue.Queue(), one per in-flight /api/check call. Lets the
-    # frontend open an SSE stream scoped to *its own* check instead of a
-    # global broadcast — important since the slot-checker (unlike /booking)
-    # is meant to be multi-visitor, so two people checking at once must
-    # never see each other's progress events.
-    check_queues = {}
-    check_queues_lock = threading.Lock()
+    # check_id -> {"queue", "browser", "cancelled"}, one per in-flight
+    # /api/check call. Lets the frontend open an SSE stream scoped to *its
+    # own* check instead of a global broadcast — important since the
+    # slot-checker (unlike /booking) is meant to be multi-visitor, so two
+    # people checking at once must never see each other's progress events.
+    # The "browser" handle is what makes /api/check-cancel able to actually
+    # stop the bot mid-check instead of just hiding the frontend overlay.
+    check_sessions = {}
+    check_sessions_lock = threading.Lock()
 
     @app.route("/")
     def home():
@@ -58,28 +68,80 @@ def create_app(bridge):
             return jsonify({"status": "error", "message": "Unknown country."}), 404
 
         check_id = uuid.uuid4().hex
-        status_queue = queue.Queue()
-        with check_queues_lock:
-            check_queues[check_id] = status_queue
+        session = {"queue": queue.Queue(), "browser": None, "cancelled": False}
+        with check_sessions_lock:
+            check_sessions[check_id] = session
 
         def on_status(event):
-            status_queue.put({"type": "status", "event": event})
+            session["queue"].put({"type": "status", "event": event})
+
+        def on_browser(browser):
+            session["browser"] = browser
 
         def worker():
-            try:
-                result = check_country_slot(country, on_status=on_status)
-            except Exception:
-                result = {"status": "error", "message": "Something went wrong while checking. Please try again."}
-            status_queue.put({"type": "result", "data": result})
+            done = threading.Event()
+            holder = {}
+
+            def run_check():
+                try:
+                    holder["result"] = check_country_slot(country, on_status=on_status, on_browser=on_browser)
+                except Exception:
+                    holder["result"] = {"status": "error", "message": "Something went wrong while checking. Please try again."}
+                done.set()
+
+            # Run the actual check in its own thread so this one can give up
+            # waiting after CHECK_TIMEOUT_SECONDS instead of blocking forever
+            # on it — Python can't force-kill a thread, but force-quitting
+            # the browser unblocks whatever Selenium call is stuck, so the
+            # abandoned thread exits shortly after anyway.
+            threading.Thread(target=run_check, daemon=True).start()
+            finished = done.wait(timeout=CHECK_TIMEOUT_SECONDS)
+
+            if not finished:
+                browser = session.get("browser")
+                if browser is not None:
+                    try:
+                        browser.sb.driver.quit()
+                    except Exception:
+                        pass
+                result = {
+                    "status": "error",
+                    "message": "This check is taking unusually long (possibly a captcha that couldn't be solved) and was stopped. Please try again.",
+                }
+            elif session["cancelled"]:
+                result = {"status": "cancelled", "message": "Check cancelled."}
+            else:
+                result = holder.get("result", {"status": "error", "message": "Something went wrong while checking. Please try again."})
+
+            session["queue"].put({"type": "result", "data": result})
 
         threading.Thread(target=worker, daemon=True).start()
         return jsonify({"check_id": check_id})
 
+    @app.route("/api/check-cancel/<check_id>", methods=["POST"])
+    def api_check_cancel(check_id):
+        session = check_sessions.get(check_id)
+        if session is None:
+            return jsonify({"ok": False}), 404
+
+        session["cancelled"] = True
+        browser = session.get("browser")
+        if browser is not None:
+            # Force-quitting the Chrome session is what actually stops the
+            # bot — without this, "cancel" would only hide the frontend
+            # overlay while the check kept running server-side.
+            try:
+                browser.sb.driver.quit()
+            except Exception:
+                pass
+        return jsonify({"ok": True})
+
     @app.route("/api/check-stream/<check_id>")
     def check_stream(check_id):
-        status_queue = check_queues.get(check_id)
-        if status_queue is None:
+        session = check_sessions.get(check_id)
+        if session is None:
             return Response(status=404)
+        status_queue = session["queue"]
 
         def stream():
             try:
@@ -89,8 +151,8 @@ def create_app(bridge):
                     if event["type"] == "result":
                         break
             finally:
-                with check_queues_lock:
-                    check_queues.pop(check_id, None)
+                with check_sessions_lock:
+                    check_sessions.pop(check_id, None)
 
         return Response(stream(), mimetype="text/event-stream")
 

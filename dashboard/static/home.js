@@ -8,6 +8,8 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M8.5 15a5 5 0 0 1 7 0"/></svg>',
   error:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>',
+  cross:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
 };
 
 // Mirrors the real event names slot_check_service.py emits (via
@@ -24,12 +26,16 @@ const STATUS_INFO = {
   finalizing: { pct: 92, text: "Finalizing result..." },
 };
 
-let progressFillEl = null;
+const RING_CIRCUMFERENCE = 213.6; // 2 * PI * r(34), matches home.css
+
+let loaderArcEl = null;
 let loadingStatusEl = null;
 let driftTimer = null;
 let currentPct = 0;
 let driftCap = 100;
 let activeEventSource = null;
+let activeCheckId = null;
+let isLoading = false;
 
 function clearDrift() {
   if (driftTimer) {
@@ -47,11 +53,13 @@ function closeEventSource() {
 
 function setProgress(pct, text) {
   currentPct = pct;
-  if (progressFillEl) progressFillEl.style.width = pct + "%";
+  if (loaderArcEl) {
+    loaderArcEl.style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - pct / 100);
+  }
   if (text != null && loadingStatusEl) loadingStatusEl.textContent = text;
 }
 
-// Lets the bar creep slightly between real backend events (e.g. during the
+// Lets the ring creep slightly between real backend events (e.g. during the
 // ~20s OTP-wait window) so it doesn't look frozen, but it never overtakes
 // the next real checkpoint — the text only ever changes on a real event.
 function startDrift(cap) {
@@ -59,8 +67,7 @@ function startDrift(cap) {
   driftCap = cap;
   driftTimer = setInterval(() => {
     if (currentPct < driftCap - 0.5) {
-      currentPct = Math.min(currentPct + 0.4, driftCap);
-      if (progressFillEl) progressFillEl.style.width = currentPct + "%";
+      setProgress(Math.min(currentPct + 0.4, driftCap), null);
     }
   }, 900);
 }
@@ -68,17 +75,32 @@ function startDrift(cap) {
 function stopLoading() {
   clearDrift();
   closeEventSource();
+  isLoading = false;
+  activeCheckId = null;
 }
 
 function closeOverlay() {
   stopLoading();
   overlay.hidden = true;
   resultBox.innerHTML = "";
+  resultBox.classList.remove("boxed");
+}
+
+// Cancels the in-flight backend check (force-quits its Chrome session via
+// /api/check-cancel) and immediately dismisses the overlay — used by both
+// the loader's hover-cross and a click anywhere else on screen.
+function cancelAndClose() {
+  if (activeCheckId) {
+    fetch(`/api/check-cancel/${activeCheckId}`, { method: "POST" }).catch(() => {});
+  }
+  closeOverlay();
 }
 
 function showLoading(name) {
   overlay.hidden = false;
   resultBox.innerHTML = "";
+  resultBox.classList.remove("boxed");
+  isLoading = true;
 
   const wrap = document.createElement("div");
   wrap.className = "result-loading";
@@ -87,12 +109,17 @@ function showLoading(name) {
   heading.className = "loading-title";
   heading.textContent = `Checking ${name} (London, Tourism)`;
 
-  const track = document.createElement("div");
-  track.className = "progress-track";
-  const fill = document.createElement("div");
-  fill.className = "progress-fill";
-  track.appendChild(fill);
-  progressFillEl = fill;
+  const circle = document.createElement("div");
+  circle.className = "loader-circle";
+  circle.title = "Cancel check";
+  circle.innerHTML = `
+    <svg class="loader-ring" viewBox="0 0 80 80">
+      <circle class="loader-track" cx="40" cy="40" r="34"></circle>
+      <circle class="loader-arc" cx="40" cy="40" r="34"></circle>
+    </svg>
+    <span class="loader-cancel">${ICONS.cross}</span>
+  `;
+  loaderArcEl = circle.querySelector(".loader-arc");
 
   const status = document.createElement("p");
   status.className = "loading-status";
@@ -100,10 +127,10 @@ function showLoading(name) {
 
   const hint = document.createElement("p");
   hint.className = "loading-hint";
-  hint.textContent = "Live checks can take up to a minute — sit tight.";
+  hint.textContent = "Hover the circle (or click anywhere) to cancel.";
 
   wrap.appendChild(heading);
-  wrap.appendChild(track);
+  wrap.appendChild(circle);
   wrap.appendChild(status);
   wrap.appendChild(hint);
   resultBox.appendChild(wrap);
@@ -125,6 +152,7 @@ function infoRow(dl, label, value) {
 function renderResult(name, data) {
   stopLoading();
   resultBox.innerHTML = "";
+  resultBox.classList.add("boxed");
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "modal-close";
@@ -164,6 +192,17 @@ function renderResult(name, data) {
       data.slot_details ||
       "We are sorry but no appointment slots are currently available. New slots open at regular intervals, please try again later.";
     resultBox.appendChild(p);
+  } else if (data.status === "cancelled") {
+    heading.className = "result-empty";
+    icon.innerHTML = ICONS.empty;
+    heading.appendChild(icon);
+    heading.appendChild(document.createTextNode("Check cancelled"));
+    resultBox.appendChild(heading);
+
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "You cancelled this check before it finished.";
+    resultBox.appendChild(p);
   } else {
     heading.className = "result-error";
     icon.innerHTML = ICONS.error;
@@ -188,7 +227,7 @@ function renderResult(name, data) {
 
 // Subscribes to this specific check's SSE stream and reflects real backend
 // milestones onto the loader. `finish` re-enables the country card once the
-// check settles, however it settles (result or dropped connection).
+// check settles, however it settles (result, cancel, or dropped connection).
 function streamCheck(checkId, name, finish) {
   const es = new EventSource(`/api/check-stream/${checkId}`);
   activeEventSource = es;
@@ -248,6 +287,7 @@ function startCheck(card) {
         finish();
         return;
       }
+      activeCheckId = data.check_id;
       streamCheck(data.check_id, name, finish);
     })
     .catch(() => {
@@ -260,7 +300,16 @@ document.querySelectorAll(".country-card").forEach((card) => {
   card.addEventListener("click", () => startCheck(card));
 });
 
+// While loading: a click ANYWHERE (the circle, its cancel cross, or the bare
+// backdrop) cancels the in-flight check and dismisses the overlay. Once a
+// result is showing (boxed card), only a click on the dim backdrop itself
+// closes it — clicking inside the result card (e.g. its action buttons)
+// must not.
 overlay.addEventListener("click", (e) => {
+  if (isLoading) {
+    cancelAndClose();
+    return;
+  }
   if (e.target === overlay) closeOverlay();
 });
 
@@ -270,6 +319,7 @@ function showComingSoon() {
   stopLoading();
   overlay.hidden = false;
   resultBox.innerHTML = "";
+  resultBox.classList.add("boxed");
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "modal-close";

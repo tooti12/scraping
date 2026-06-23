@@ -587,15 +587,25 @@ a {
   display: none;
 }
 
-.result-box {
+#result-box {
   position: relative;
+  max-width: 460px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Loading state floats directly on the dim backdrop — no card chrome —
+   per design: only the result (and the cancellable circular loader) should
+   read as "boxed" UI. */
+#result-box.boxed {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
   padding: 1.8rem;
-  max-width: 460px;
-  width: 100%;
   box-shadow: var(--shadow-pop);
+  align-items: stretch;
 }
 
 .modal-close {
@@ -632,23 +642,69 @@ a {
 .result-loading .loading-title {
   font-weight: 600;
   font-size: 1rem;
+  color: var(--text);
 }
 
-.progress-track {
+/* Circular, cancellable loader — hover swaps the progress ring for a cross
+   so it's obvious clicking it stops the check; it floats directly on the
+   dim backdrop (#result-box has no .boxed card during loading). */
+.loader-circle {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.loader-ring {
   width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--surface-alt);
-  border: 1px solid var(--border);
-  overflow: hidden;
+  height: 100%;
+  transform: rotate(-90deg);
+  transition: opacity 0.15s;
 }
 
-.progress-fill {
-  height: 100%;
-  width: 4%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), #8a5bff);
-  transition: width 0.6s ease;
+.loader-track {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 6;
+}
+
+.loader-arc {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 213.6;
+  stroke-dashoffset: 213.6;
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+.loader-cancel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  color: var(--danger);
+}
+
+.loader-cancel svg {
+  width: 28px;
+  height: 28px;
+}
+
+.loader-circle:hover .loader-ring {
+  opacity: 0;
+}
+
+.loader-circle:hover .loader-cancel {
+  opacity: 1;
+  background: var(--danger-soft);
 }
 
 .loading-status {

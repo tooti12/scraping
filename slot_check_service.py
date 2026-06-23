@@ -16,14 +16,18 @@ from browser_client import BrowserClient
 from config import SHARED_VFS_ACCOUNT
 
 
-def check_country_slot(country: str, on_status=None) -> dict:
+def check_country_slot(country: str, on_status=None, on_browser=None) -> dict:
     """Run one slot check for `country`. Always returns a dict
     with a "status" key: "slots_available" | "no_slots" | "error".
 
     on_status, if given, is called with a short event-name string at each
     real milestone (connecting, logging in, OTP wait, etc.) — this is what
     lets dashboard/app.py mirror actual backend progress to the frontend
-    instead of a generic/disconnected loading message."""
+    instead of a generic/disconnected loading message.
+
+    on_browser, if given, is called once with the live BrowserClient as soon
+    as it exists — dashboard/app.py uses this to stash a handle to it so a
+    user-initiated cancel can force-quit the Chrome session mid-check."""
 
     def emit(event):
         if on_status:
@@ -38,6 +42,11 @@ def check_country_slot(country: str, on_status=None) -> dict:
     try:
         emit("connecting")
         with BrowserClient(country, proxy=True, headless=False) as browser:
+            if on_browser:
+                try:
+                    on_browser(browser)
+                except Exception:
+                    pass
             auth = AuthHandler(country, email, password, browser, on_status=emit)
             token = auth.authenticate()
             if token is None:
