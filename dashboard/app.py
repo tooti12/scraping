@@ -1,16 +1,32 @@
 # dashboard/app.py
-"""Local-only Flask dashboard. Talks to the booking automation exclusively
-through a FrontendBridge instance - never touches Selenium/VFS directly.
+"""Flask app serving two independent surfaces:
 
-Binds to 127.0.0.1 only. There is no authentication layer, which is
+- "/"        — public slot-checker homepage (home.html). Country cards
+               trigger a one-off, booking-free VFS slot check via
+               slot_check_service.py. No Selenium/browser state is shared
+               with the booking pipeline below.
+- "/booking" — the existing internal booking console (booking.html). Talks
+               to the booking automation exclusively through a
+               FrontendBridge instance — never touches Selenium/VFS
+               directly. This is the human-in-the-loop UI main.py's
+               BrowserClient drives via `bridge`.
+
+Binds to 127.0.0.1 only for now. There is no authentication layer, which is
 acceptable solely because this is loopback-only and single-user; the
-payment step briefly puts real card data into a request body here, so this
-must never be exposed beyond localhost without adding auth first.
+/booking payment step briefly puts real card data into a request body here.
+Before this is ever deployed publicly, "/booking" and "/api/answer" must be
+locked down (auth, or removed from the public process entirely) — only the
+"/" slot-checker surface is meant to be internet-facing.
 """
 import json
 import logging
 
 from flask import Flask, Response, jsonify, render_template, request
+
+from config import COUNTRIES
+from slot_check_service import check_country_slot
+
+_COUNTRY_CODES = {c["code"] for c in COUNTRIES}
 
 
 def create_app(bridge):
@@ -18,8 +34,18 @@ def create_app(bridge):
     app.config["bridge"] = bridge
 
     @app.route("/")
-    def index():
-        return render_template("index.html")
+    def home():
+        return render_template("home.html", countries=COUNTRIES)
+
+    @app.route("/booking")
+    def booking():
+        return render_template("booking.html")
+
+    @app.route("/api/check/<country>", methods=["POST"])
+    def api_check(country):
+        if country not in _COUNTRY_CODES:
+            return jsonify({"status": "error", "message": "Unknown country."}), 404
+        return jsonify(check_country_slot(country))
 
     @app.route("/events")
     def events():

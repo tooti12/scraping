@@ -8,6 +8,7 @@ import threading
 from seleniumbase import SB
 from seleniumbase.core import proxy_helper as _sb_proxy_helper
 
+from booking_flow import BookingFlow
 from config import APPLICANT_CONFIG, COUNTRY_CONFIG, PROXY_CONFIG
 
 
@@ -232,13 +233,18 @@ class BrowserClient:
         self.sb = None
         self._config = COUNTRY_CONFIG[country]
         # VFS account email for the active country — used as `loginUser` when
-        # registering on a mission's appointment waiting list.
+        # registering on a mission's appointment waiting list, and to look up
+        # the right APPLICANT_CONFIG entry when booking.
         self.login_user: str | None = None
+        # FrontendBridge instance (set by main.py) — routes booking_flow.py's
+        # human decision points (date/time/review/payment) to the dashboard
+        # instead of a blocking terminal input().
+        self.bridge = None
 
         print("[BrowserClient] ── Initialising BrowserClient ──")
         print(f"[BrowserClient]   country   : {country}")
         print("[BrowserClient]   UC mode   : True  (undetected Chrome, bypasses Cloudflare)")
-        print("[BrowserClient]   incognito : False")
+        print("[BrowserClient]   incognito : True (always on — no leftover cookies/session state between runs)")
         print(f"[BrowserClient]   headless  : {headless}")
         print(f"[BrowserClient]   proxy     : {'enabled (local-forward)' if proxy else 'disabled'}")
 
@@ -249,6 +255,7 @@ class BrowserClient:
 
         browser_params = {
             "uc": True,
+            "incognito": True,
             "headless2": headless,
             "chromium_arg": ",".join(chromium_args),
         }
@@ -653,14 +660,25 @@ class BrowserClient:
 
         self._log_state("After submit / captcha handling")
 
+        # Covers every banner style VFS has been observed to use for both
+        # the slots-available and no-slots-available states — the "Sorry,
+        # no appointment slots..." message doesn't always carry the
+        # `.Information` class, just `role="alert"` (or no special class at
+        # all), so the generic role selector is the one that actually fires.
+        banner_selectors = (
+            'div[role="alert"].Information',
+            ".Information.alert",
+            "div.form-info",
+            ".Information .alert",
+            'div[role="alert"]',
+            ".alert-danger",
+            ".alert-warning",
+            ".alert-info",
+        )
+
         def _read_info_banner() -> str:
             """Try every known selector for the result banner and return its text."""
-            for sel in (
-                'div[role="alert"].Information',
-                ".Information.alert",
-                "div.form-info",
-                ".Information .alert",
-            ):
+            for sel in banner_selectors:
                 els = self.sb.find_elements(sel)
                 if els:
                     text = els[0].text.strip()
@@ -670,19 +688,19 @@ class BrowserClient:
 
         # Wait for the result banner (covers both slots-available and no-slots states)
         try:
-            self.sb.wait_for_element(
-                'div[role="alert"].Information, .Information.alert, div.form-info',
-                timeout=10,
-            )
+            self.sb.wait_for_element(", ".join(banner_selectors), timeout=12)
             slot_details = _read_info_banner()
             self._log(f"  Info banner: {slot_details!r}")
-            if "earliest available" in slot_details.lower():
+            lowered = slot_details.lower()
+            if "earliest available" in lowered:
                 return "slots_available", slot_details
-            return "no_slots", slot_details
+            if slot_details:
+                return "no_slots", slot_details
         except Exception:
             pass
 
-        # Fallback: no banner — check for an enabled proceed button
+        # Fallback: no recognized banner element — check for an enabled
+        # proceed button, which only appears when slots are available.
         try:
             self.sb.wait_for_element("button.mat-btn-lg:not([disabled])", timeout=8)
             slot_details = _read_info_banner()
@@ -690,163 +708,48 @@ class BrowserClient:
         except Exception:
             pass
 
+        # Last resort: the banner text wasn't caught by any selector above —
+        # scan the raw page source for VFS's known "no slots" phrasing so a
+        # missed CSS selector is reported as no_slots, not a false error.
+        try:
+            page_text = self.sb.get_page_source().lower()
+            if "no appointment slots" in page_text or "sorry but no" in page_text:
+                return "no_slots", "No appointment slots are currently available."
+        except Exception:
+            pass
+
         return "error", ""
 
     # ------------------------------------------------------------------
-    # Interactive booking — "Your Details" (Applicant Details) step
+    # Interactive booking — "Your Details" through payment
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _prompt_yes_no(prompt: str, default: bool = False) -> bool:
-        """Blocking console y/n prompt. Empty input falls back to `default`."""
-        suffix = " [Y/n]: " if default else " [y/N]: "
-        while True:
-            try:
-                ans = input(prompt + suffix).strip().lower()
-            except EOFError:
-                return default
-            if not ans:
-                return default
-            if ans in ("y", "yes"):
-                return True
-            if ans in ("n", "no"):
-                return False
-            print("  Please answer 'yes' or 'no'.")
-
-    @staticmethod
-    def _prompt_value(label: str, default: str = "") -> str:
-        """Blocking console prompt for a text value. Press Enter to accept the default."""
-        suffix = f" [{default}]" if default else ""
-        while True:
-            try:
-                val = input(f"  {label}{suffix}: ").strip()
-            except EOFError:
-                val = ""
-            if val:
-                return val
-            if default:
-                return default
-            print("  This field is required.")
-
-    def _click_button_by_text(self, texts: list[str], scope_selector: str | None = None) -> bool:
-        """
-        Click the first visible, enabled <button> whose trimmed text exactly matches
-        (case-insensitive) one of `texts`, tried in order. Optionally restrict the
-        search to descendants of `scope_selector`. Returns True if a button was clicked.
-        """
-        scope_js = json.dumps(scope_selector) if scope_selector else "null"
-        wanted_js = json.dumps([t.lower() for t in texts])
-        js = f"""
-        const scopeSel = {scope_js};
-        const container = scopeSel ? document.querySelector(scopeSel) : document;
-        if (!container) return false;
-        const wanted = {wanted_js};
-        const buttons = Array.from(container.querySelectorAll('button'));
-        for (const want of wanted) {{
-            const btn = buttons.find(b => {{
-                if (b.disabled || b.hidden) return false;
-                const label = (b.innerText || '').trim().toLowerCase();
-                return label === want;
-            }});
-            if (btn) {{ btn.click(); return true; }}
-        }}
-        return false;
-        """
-        return bool(self.sb.execute_script(js))
-
-    def _fill_text_field(self, selector: str, value: str, label: str = "") -> None:
-        """Scroll to, focus, clear, and type `value` into the input matching `selector`."""
-        self._log(f"  Filling {label or selector!r} = {value!r}")
-        self.sb.wait_for_element(selector, timeout=10)
-        self.sb.scroll_to(selector)
-        self.sb.type(selector, value)
-        self.sb.sleep(0.3)
 
     def book_appointment(self) -> bool:
         """
-        After a 'slots_available' result on the Application Detail page, click
-        through to the 'Your Details' (Applicant Details) step, prompt the user
-        in the console for the required fields, fill them in, then Save or Cancel
-        based on the user's confirmation.
+        After a 'slots_available' result on the Application Detail page,
+        drive the full booking flow (applicant form -> OTP -> captcha ->
+        date/time -> review -> payment) via BookingFlow. Every human
+        decision point — including the applicant-form fields themselves,
+        which BookingFlow fetches live from the page rather than from a
+        static config — is routed through the dashboard via `self.bridge`
+        instead of a blocking terminal input() call.
 
-        Returns True if the form was submitted (Save clicked), False if the user
-        declined to save or the page didn't transition as expected.
+        Returns True if the flow completed (payment submitted), False if
+        it couldn't start (no bridge) or was cancelled.
         """
-        self._log("  Proceeding to 'Your Details' step...")
-        self.sb.sleep(2)
-
-        clicked = self._click_button_by_text(
-            ["continue", "proceed", "next", "book appointment", "book now", "book"]
-        )
-        if not clicked:
-            try:
-                self.sb.driver.uc_click("button.mat-btn-lg:not([disabled])")
-                clicked = True
-            except Exception:
-                pass
-
-        if not clicked:
-            self._log("  Could not find a Continue/Proceed button — aborting booking.")
-            self._log_state("Continue/Proceed button not found")
+        if not self.bridge:
+            self._log("  No dashboard bridge attached — cannot run booking flow.")
+            return False
+        if not self.login_user:
+            self._log("  No login_user set — cannot run booking flow.")
             return False
 
-        self.sb.sleep(5)
-        self._log_state("After clicking Continue/Proceed")
+        flow = BookingFlow(self, self.bridge, self.login_user)
         try:
-            self.sb.wait_for_element("app-applicant-details", timeout=15)
-        except Exception:
-            self._log("  'Your Details' page did not load — aborting booking.")
+            return bool(flow.run())
+        except Exception as e:
+            self._log(f"  Booking flow error: {e}")
             return False
-
-        self._log("  'Your Details' page loaded.")
-
-        print("\n" + "=" * 55)
-        print("  BOOKING — Applicant Details")
-        print("  Press Enter to accept the default shown in [brackets].")
-        print("=" * 55)
-
-        cfg = APPLICANT_CONFIG
-        cover_letter_id = self._prompt_value("Cover Letter ID")
-        first_name      = self._prompt_value("First Name", cfg.get("firstName", ""))
-        last_name       = self._prompt_value("Last Name", cfg.get("lastName", ""))
-        passport_number = self._prompt_value("Passport Number", cfg.get("passportNumber", ""))
-        dial_code       = self._prompt_value("Contact dial code", cfg.get("dialCode", ""))
-        contact_number  = self._prompt_value("Contact number", cfg.get("contactNumber", ""))
-        email           = self._prompt_value("Email", cfg.get("emailId", ""))
-
-        fields = [
-            ('app-applicant-details input[placeholder="Enter Cover Letter ID"]', cover_letter_id, "Cover Letter ID"),
-            ('app-applicant-details input[placeholder="Enter your first name"]', first_name, "First Name"),
-            ('app-applicant-details input[placeholder="Please enter last name."]', last_name, "Last Name"),
-            ('app-applicant-details input[placeholder="Enter passport number"]', passport_number, "Passport Number"),
-            ('app-applicant-details input[placeholder="44"]', dial_code, "Dial Code"),
-            ('app-applicant-details input[placeholder="012345648382"]', contact_number, "Contact Number"),
-            ('app-applicant-details input[placeholder="Enter Email Address"]', email, "Email"),
-        ]
-
-        for selector, value, label in fields:
-            try:
-                self._fill_text_field(selector, value, label)
-            except Exception as e:
-                self._log(f"  Could not fill {label} ({selector}): {e}")
-
-        print("\nReview the values entered above against the form in the browser.")
-        if not self._prompt_yes_no("Click SAVE to continue the booking?"):
-            self._log("  User declined to save — clicking Cancel.")
-            self._click_button_by_text(["cancel"], scope_selector="app-applicant-details")
-            self.sb.sleep(2)
-            self._log_state("After clicking Cancel")
-            return False
-
-        self._log("  Clicking Save...")
-        if not self._click_button_by_text(["save"], scope_selector="app-applicant-details"):
-            self._log("  Could not find the Save button.")
-            return False
-
-        self.sb.sleep(5)
-        self._log("  Save clicked — booking form submitted.")
-        self._log_state("After clicking Save")
-        return True
 
     # ------------------------------------------------------------------
     # Exhaustive combination scan
@@ -906,12 +809,15 @@ class BrowserClient:
         self._log(f"Found {len(centre_options)} centre(s): "
                   f"{[c['text'] for c in centre_options]}")
 
-        # Only London centres are in scope — skip Edinburgh, Manchester, etc.
-        centre_options = [c for c in centre_options if "london" in c["text"].lower()]
-        self._log(f"London centre(s) in scope: {[c['text'] for c in centre_options]}")
+        # TESTING: London + Edinburgh centres are in scope — skip Manchester, etc.
+        centre_options = [
+            c for c in centre_options
+            if "london" in c["text"].lower() or "edinburgh" in c["text"].lower()
+        ]
+        self._log(f"Centre(s) in scope: {[c['text'] for c in centre_options]}")
 
         if not centre_options:
-            self._log("ERROR: no London centre options found — aborting.")
+            self._log("ERROR: no London/Edinburgh centre options found — aborting.")
             return []
 
         appt_cats_by_centre: dict = {}
@@ -1022,8 +928,10 @@ class BrowserClient:
                 "slot_details": slot_details,
             })
 
-            # A slot is available — pause and let the user decide whether to
-            # book it now via the console.
+            # A slot is available — ask the dashboard whether to proceed to
+            # booking before doing anything irreversible. If the user
+            # declines (or there's no dashboard to ask), stop scanning this
+            # country and let the caller move on to the next one.
             booking_initiated = False
             if result == "slots_available":
                 print("\n" + "=" * 55)
@@ -1032,21 +940,39 @@ class BrowserClient:
                 if slot_details:
                     print(f"    {slot_details}")
                 print("=" * 55)
-                if self._prompt_yes_no("Proceed with booking this slot?"):
+
+                proceed = False
+                if self.bridge:
+                    self._log("  Asking dashboard whether to proceed to booking...")
+                    answer = self.bridge.ask(
+                        "confirm_booking",
+                        {
+                            "country": self.country,
+                            "centre": centre["text"],
+                            "appt_cat": appt_cat["text"],
+                            "sub_cat": sub_cat["text"],
+                            "slot_details": slot_details,
+                        },
+                    )
+                    proceed = bool(answer and answer.get("confirmed"))
+                else:
+                    self._log("  No dashboard bridge attached — cannot ask, skipping booking.")
+
+                if proceed:
                     try:
                         booking_initiated = self.book_appointment()
                     except Exception as e:
                         self._log(f"  Booking error: {e}")
                     results[-1]["booking_status"] = (
-                        "initiated" if booking_initiated else "cancelled"
+                        "initiated" if booking_initiated else "failed"
                     )
                 else:
-                    self._log("  Booking skipped by user.")
-                    results[-1]["booking_status"] = "skipped"
+                    self._log("  Booking declined for this slot — moving to next country.")
+                    results[-1]["booking_status"] = "skipped_by_user"
 
-            if booking_initiated:
-                self._log("  Booking in progress — stopping combination scan "
-                          "for this country.")
+                # Either way, the decision for this country's scan is made —
+                # don't keep testing further combinations.
+                self._log("  Stopping combination scan for this country.")
                 break
 
             if idx < total:
@@ -1091,6 +1017,73 @@ class BrowserClient:
                 )
         self._log("=" * 55)
         return results
+
+    # ------------------------------------------------------------------
+    # Read-only slot check (no booking) — used by the public slot-checker
+    # web page. Deliberately independent of check_all_combinations() /
+    # book_appointment(): it never asks a human and never starts the
+    # booking_flow.py state machine, so it can't interfere with the
+    # existing human-in-the-loop booking pipeline.
+    # ------------------------------------------------------------------
+
+    def check_slot_only(
+        self, centre_keyword: str = "london", sub_cat_keywords=("tourist", "tourism")
+    ) -> dict:
+        """
+        Pick the first centre matching `centre_keyword`, its first
+        appointment category, and the first sub-category matching
+        `sub_cat_keywords`, submit, and report the result — read only.
+
+        Returns a dict with at least a "result" key
+        ("slots_available" | "no_slots" | "error") plus whichever of
+        "centre"/"appt_cat"/"sub_cat"/"slot_details"/"reason" apply.
+        """
+        self._navigate_to_booking_form()
+
+        self._log("Reading Application Centre options (mat-select-0)...")
+        centre_options = self._read_mat_options("mat-select-0")
+        centre = next(
+            (c for c in centre_options if centre_keyword in c["text"].lower()), None
+        )
+        if not centre:
+            self._log(f"No centre matching '{centre_keyword}' found.")
+            return {"result": "error", "reason": "centre_not_found"}
+
+        self._select_mat_option("mat-select-0", centre["id"])
+        self.sb.sleep(2)
+
+        appt_cats = self._read_mat_options("mat-select-2")
+        if not appt_cats:
+            self._log("No appointment category options found.")
+            return {"result": "error", "reason": "no_appointment_category", "centre": centre}
+        appt_cat = appt_cats[0]
+        self._select_mat_option("mat-select-2", appt_cat["id"])
+        self.sb.sleep(2)
+
+        sub_cats = self._read_mat_options("mat-select-1")
+        sub_cat = next(
+            (s for s in sub_cats if s["text"].lower() in sub_cat_keywords), None
+        )
+        if not sub_cat:
+            self._log(f"No sub-category matching {sub_cat_keywords} found.")
+            return {
+                "result": "error",
+                "reason": "sub_category_not_found",
+                "centre": centre,
+                "appt_cat": appt_cat,
+            }
+        self._select_mat_option("mat-select-1", sub_cat["id"])
+        self.sb.sleep(2)
+
+        result, slot_details = self._submit_and_read_result()
+        self._log(f"check_slot_only result: {result} — {slot_details}")
+        return {
+            "centre": centre,
+            "appt_cat": appt_cat,
+            "sub_cat": sub_cat,
+            "result": result,
+            "slot_details": slot_details,
+        }
 
     def call_check_slot(self, login_user: str, jwt_token: str):
         cfg = self._config
@@ -1155,7 +1148,7 @@ class BrowserClient:
         jwt_token = self.get_auth_token()
         route = f"{cfg['countryCode']}/en/{cfg['missionCode']}"
 
-        applicant = dict(APPLICANT_CONFIG)
+        applicant = dict(APPLICANT_CONFIG.get(self.login_user, {}).get("api", {}))
         applicant["loginUser"] = self.login_user
 
         body = {

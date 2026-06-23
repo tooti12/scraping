@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VFS Slot Checker</title>
+  <link rel="stylesheet" href="/static/home.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="brand">VFS Slot Checker</div>
+    <div class="nav-links">
+      <a href="#how-it-works">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#countries">Countries</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-copy">
+      <h1>Check VFS visa appointment availability in seconds</h1>
+      <p>
+        Stop manually refreshing the VFS website. Pick your destination country and our bot
+        checks VFS Global for an open appointment slot right now.
+      </p>
+      <a class="hero-cta" href="#countries">Check a country →</a>
+      <p class="scope-note">
+        Currently checking the <strong>London</strong> centre only, <strong>Tourism</strong> category only —
+        more centres and visa categories are coming soon.
+      </p>
+    </div>
+  </header>
+
+  <section class="section" id="how-it-works">
+    <h2 class="section-title">How it works</h2>
+    <div class="steps-grid">
+      <div class="step-card">
+        <span class="step-number">1</span>
+        <h3>Pick your destination</h3>
+        <p class="muted">Choose the country you're applying to from the list below.</p>
+      </div>
+      <div class="step-card">
+        <span class="step-number">2</span>
+        <h3>We check VFS for you</h3>
+        <p class="muted">Our bot logs in to VFS Global and checks live appointment availability.</p>
+      </div>
+      <div class="step-card">
+        <span class="step-number">3</span>
+        <h3>Get an instant result</h3>
+        <p class="muted">See immediately whether a slot is open, and which centre and category it's under.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="features">
+    <h2 class="section-title">Why use this</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <h3>Real-time checks</h3>
+        <p class="muted">Every click runs a live check against VFS Global — never cached or stale data.</p>
+      </div>
+      <div class="feature-card">
+        <h3>No manual refreshing</h3>
+        <p class="muted">Skip the constant refresh-and-hope routine that VFS slot hunting usually demands.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Automated &amp; accurate</h3>
+        <p class="muted">The same automation that powers our booking pipeline, just for checking availability.</p>
+      </div>
+    </div>
+  </section>
+
+  <main class="section" id="countries">
+    <h2 class="section-title">Select a country</h2>
+    <div class="country-grid">
+      {% for c in countries %}
+      <button class="country-card" data-country="{{ c.code }}" data-name="{{ c.name }}">
+        <span class="country-code">{{ c.code|upper }}</span>
+        <span class="country-name">{{ c.name }}</span>
+        <span class="country-cta">Check availability →</span>
+      </button>
+      {% endfor %}
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span>VFS Slot Checker — not affiliated with VFS Global.</span>
+    <a href="/booking">Booking Console</a>
+  </footer>
+
+  <div class="result-overlay" id="result-overlay" hidden>
+    <div class="result-box" id="result-box"></div>
+  </div>
+
+  <script src="/static/home.js"></script>
+</body>
+</html>

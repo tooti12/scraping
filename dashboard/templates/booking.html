@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VFS Booking Console</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <span class="dot" id="conn-dot" title="Connection status"></span>
+      <h1>VFS Booking Console</h1>
+    </div>
+    <div class="topbar-step" id="current-step">Idle</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel panel-action" id="prompt-section">
+      <h2 class="panel-title">Action Required</h2>
+      <div id="prompt-container">
+        <div class="empty-state">
+          <div class="spinner"></div>
+          <p class="muted">No action needed right now — waiting on the bot.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-log" id="status-section">
+      <h2 class="panel-title">Activity Log</h2>
+      <ul id="status-list"></ul>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

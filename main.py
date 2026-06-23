@@ -1,14 +1,16 @@
 # main.py
 import json
 import os
+import sys
 import threading
 import time
 from datetime import datetime
 from typing import Any
 
 from auth_handler import AuthHandler
-from booking_flow import BookingFlow
 from browser_client import BrowserClient
+from dashboard.app import run_dashboard
+from frontend_bridge import FrontendBridge
 from notification_handler import SMSNotifier
 
 # ──────────────────────────────────────────────
@@ -91,8 +93,9 @@ def _keep_screen_awake() -> None:
 # ──────────────────────────────────────────────
 
 class VfsScraper:
-    def __init__(self, accounts: list[tuple[str, str, str]]) -> None:
+    def __init__(self, accounts: list[tuple[str, str, str]], bridge: FrontendBridge) -> None:
         self.accounts = accounts          # [(country, email, password), ...]
+        self.bridge = bridge
         self.notifier = SMSNotifier()
         os.makedirs("logs", exist_ok=True)
         self._log_file = (
@@ -126,6 +129,7 @@ class VfsScraper:
         """
         browser.switch_country(country)
         browser.login_user = email
+        browser.bridge = self.bridge
 
         auth = AuthHandler(country, email, password, browser)
         token = auth.authenticate()
@@ -314,16 +318,29 @@ class VfsScraper:
 if __name__ == "__main__":
     threading.Thread(target=_keep_screen_awake, daemon=True).start()
     print("Screen-awake thread started.")
-    print("VFS Appointment Scraper — multi-country")
-    print("=" * 50)
-    print(f"Countries: {', '.join(c.upper() for c, _, _ in ACCOUNTS)}")
-    print("=" * 50)
-
     bridge = FrontendBridge()
-    dashboard_thread = threading.Thread(
-        target=run_dashboard, args=(bridge,), daemon=True
-    )
-    dashboard_thread.start()
-    print("🖥️  Dashboard running at http://127.0.0.1:5050")
 
-    VfsScraper(ACCOUNTS).start_monitoring()
+    # Default: dashboard only — no browser opens until a visitor clicks a
+    # country card on the homepage (see dashboard/app.py's /api/check route
+    # and slot_check_service.py), which runs a one-off, single-country
+    # check. Pass --monitor to instead run the old always-on, all-countries
+    # continuous booking monitor (opens its own browser immediately and
+    # loops forever — unrelated to the on-demand frontend checks).
+    if "--monitor" in sys.argv:
+        print("VFS Appointment Scraper — multi-country continuous monitor")
+        print("=" * 50)
+        print(f"Countries: {', '.join(c.upper() for c, _, _ in ACCOUNTS)}")
+        print("=" * 50)
+        dashboard_thread = threading.Thread(
+            target=run_dashboard, args=(bridge,), daemon=True
+        )
+        dashboard_thread.start()
+        print("Dashboard running at http://127.0.0.1:5050")
+        VfsScraper(ACCOUNTS, bridge).start_monitoring()
+    else:
+        print("VFS Slot Checker — dashboard only (no browser will open yet)")
+        print("=" * 50)
+        print("Visit http://127.0.0.1:5050 and pick a country to check for slots.")
+        print("(Run 'python main.py --monitor' for the old continuous booking monitor instead.)")
+        print("=" * 50)
+        run_dashboard(bridge)

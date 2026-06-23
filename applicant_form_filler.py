@@ -3,10 +3,11 @@
 
 The form's field set changes per destination country/visa category (the
 Angular app renders it via app-dynamic-form/app-dynamic-control), so instead
-of hard-coding selectors per field, this reads each visible control's label
-text and looks the value up from an applicant config dict. Unmapped labels
-are skipped and reported instead of failing, so a country adding/removing a
-field doesn't break the whole form fill.
+of hard-coding selectors per field, this discovers each visible control's
+label (and whether VFS marks it required with a '*') straight from the live
+page, and fills it from a values dict keyed by that exact label text. The
+caller (booking_flow.py) fetches the fields, asks the dashboard for values,
+then calls fill_dynamic() with whatever the user submitted.
 
 NOTE: the DOM traversal here is reverse-engineered from a static HTML dump
 of the VFS site, not verified against a live render. The label/element
@@ -16,54 +17,46 @@ thing checked if a field silently fails to map.
 """
 import json
 
-LABEL_KEY_MAP = {
-    "cover letter id": "cover_letter_id",
-    "first name": "first_name",
-    "last name": "last_name",
-    "gender": "gender",
-    "date of birth": "date_of_birth",
-    "current nationality": "current_nationality",
-    "passport number": "passport_number",
-    "passport expiry date": "passport_expiry_date",
-    "dial code": "contact_dial_code",
-    "contact number": "contact_number",
-    "email": "email",
-}
-
 JS_COLLECT_FIELDS = """
-function getLabel(root) {
+function getLabelInfo(root) {
     const div = root.querySelector(':scope > div > div');
-    if (!div) return '';
-    return div.textContent.replace(/\\*/g, '').trim();
+    if (!div) return { label: '', required: false };
+    const raw = div.textContent.trim();
+    return { label: raw.replace(/\\*/g, '').trim(), required: raw.indexOf('*') !== -1 };
 }
 const results = [];
 document.querySelectorAll('app-input-control').forEach(el => {
     if (el.offsetParent === null) return;
     const input = el.querySelector('input[matinput]');
     if (!input) return;
-    results.push({label: getLabel(el), id: input.id, kind: 'text'});
+    const info = getLabelInfo(el);
+    results.push({label: info.label, required: info.required, id: input.id, kind: 'text'});
 });
 document.querySelectorAll('app-dropdown').forEach(el => {
     if (el.offsetParent === null) return;
     const select = el.querySelector('mat-select');
     if (!select) return;
-    results.push({label: getLabel(el), id: select.id, kind: 'select'});
+    const info = getLabelInfo(el);
+    results.push({label: info.label, required: info.required, id: select.id, kind: 'select'});
 });
 document.querySelectorAll('app-ngb-datepicker').forEach(el => {
     if (el.offsetParent === null) return;
     const input = el.querySelector('input[ngbdatepicker]');
     if (!input) return;
-    results.push({label: getLabel(el), id: input.id, kind: 'date'});
+    const info = getLabelInfo(el);
+    results.push({label: info.label, required: info.required, id: input.id, kind: 'date'});
 });
 document.querySelectorAll('.d-block').forEach(el => {
     const header = el.querySelector(':scope > div > div');
     if (!header) return;
-    const label = header.textContent.replace(/\\*/g, '').trim();
+    const rawHeader = header.textContent.trim();
+    const label = rawHeader.replace(/\\*/g, '').trim();
     if (!/contact number/i.test(label)) return;
+    const required = rawHeader.indexOf('*') !== -1;
     const inputs = el.querySelectorAll('input[matinput]');
     if (inputs.length >= 2) {
-        results.push({label: 'Dial Code', id: inputs[0].id, kind: 'text'});
-        results.push({label: 'Contact Number', id: inputs[1].id, kind: 'text'});
+        results.push({label: 'Dial Code', required: required, id: inputs[0].id, kind: 'text'});
+        results.push({label: 'Contact Number', required: required, id: inputs[1].id, kind: 'text'});
     }
 });
 return results;
@@ -74,24 +67,27 @@ class ApplicantFormFiller:
     def __init__(self, browser_client):
         self.browser = browser_client
 
-    def fill(self, applicant_config):
-        """Fill every visible field on the current 'your-details' form that
-        has a matching key in applicant_config. Returns the list of labels
-        that had no config mapping (for logging/debugging)."""
-        fields = self._collect_fields()
+    def collect_fields(self):
+        """Read every visible field on the current 'your-details' form
+        straight from the DOM. Returns
+        [{"label": ..., "required": bool, "id": ..., "kind": "text"|"select"|"date"}, ...]
+        """
+        return self.browser.sb.execute_script(JS_COLLECT_FIELDS) or []
+
+    def fill_dynamic(self, fields, values):
+        """Fill every field using values keyed by its exact label text (as
+        returned by collect_fields()). Returns the list of labels left
+        blank (for logging/debugging)."""
         unmatched = []
         for field in fields:
-            key = LABEL_KEY_MAP.get(field["label"].strip().lower())
-            if not key or not applicant_config.get(key):
+            value = values.get(field["label"])
+            if not value:
                 unmatched.append(field["label"])
                 continue
-            self._fill_field(field, applicant_config[key])
+            self._fill_field(field, value)
         if unmatched:
-            print(f"Form fields with no config mapping (skipped): {unmatched}")
+            print(f"Form fields left blank (no value submitted): {unmatched}")
         return unmatched
-
-    def _collect_fields(self):
-        return self.browser.sb.execute_script(JS_COLLECT_FIELDS) or []
 
     def _fill_field(self, field, value):
         sb = self.browser.sb

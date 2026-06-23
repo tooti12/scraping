@@ -1,5 +1,25 @@
 # config.py
 
+# Countries shown as cards on the public slot-checker homepage
+# (dashboard/templates/home.html). Each "code" must have a COUNTRY_CONFIG
+# entry below. Kept separate from main.py's ACCOUNTS list so the existing
+# continuous booking monitor never has to change shape for this.
+COUNTRIES = [
+    {"code": "dnk", "name": "Denmark"},
+    {"code": "bgr", "name": "Bulgaria"},
+    {"code": "svn", "name": "Slovenia"},
+    {"code": "che", "name": "Switzerland"},
+]
+
+# Shared VFS login used by the public slot-only checker (see
+# slot_check_service.py) — MVP checks on behalf of every visitor with one
+# account, same as main.py's monitor does today. Per-visitor credentials can
+# replace this once the product needs real multi-tenant accounts.
+SHARED_VFS_ACCOUNT = {
+    "email": "umar.jwork@gmail.com",
+    "password": "P@ssword123",
+}
+
 COUNTRY_CONFIG = {
     "nld": {
         "countryCode": "gbr",
@@ -69,73 +89,101 @@ COUNTRY_CONFIG = {
             "subCategoryCode": "TOU",
         },
     },
+    "svn": {
+        "countryCode": "gbr",
+        "missionCode": "svn",
+        "vacCode": "SVN-LON",
+        "visaCategoryCode": "TV",
+        "ui": {
+            "centerCode": None,
+            "appointmentCategoryCode": None,
+            "subCategoryCode": None,
+        },
+    },
+    "che": {
+        "countryCode": "gbr",
+        "missionCode": "che",
+        "vacCode": "CHE-LON",
+        "visaCategoryCode": "TV",
+        "ui": {
+            "centerCode": None,
+            "appointmentCategoryCode": None,
+            "subCategoryCode": None,
+        },
+    },
 }
 
-# Default applicant registered on a mission's waiting list when
-# `waitlist_enabled` is set in COUNTRY_CONFIG (POST /appointment/applicants,
-# isWaitlist=true). `loginUser` is filled in at runtime with the VFS account
-# email used to log in for that mission.
+# One entry per VFS account email, holding the shape call_add_applicant()
+# needs for its waitlist POST body (POST /appointment/applicants,
+# isWaitlist=true); `loginUser` is filled in at runtime from the active
+# account. The 'your-details' applicant form itself is no longer filled
+# from a static config — booking_flow.py fetches the live form's fields
+# and asks the dashboard for values on every booking instead.
 APPLICANT_CONFIG = {
-    "urn": "",
-    "arn": "",
-    "firstName": "AHMAR",
-    "employerFirstName": "",
-    "middleName": "",
-    "lastName": "ALI",
-    "employerLastName": "",
-    "salutation": "",
-    "gender": 1,
-    "nationalId": None,
-    "VisaToken": None,
-    "employerContactNumber": "",
-    "contactNumber": "07724267222",
-    "dialCode": "44",
-    "employerDialCode": "",
-    "passportNumber": "EK1812233",
-    "confirmPassportNumber": None,
-    "passportExpirtyDate": "03/09/2031",
-    "dateOfBirth": "09/08/1995",
-    "emailId": "UMARJAVED56@GMAIL.COM",
-    "employerEmailId": "",
-    "nationalityCode": "PAK",
-    "state": "HERTS",
-    "city": "WGC",
-    "isEndorsedChild": False,
-    "applicantType": 0,
-    "addressline1": "31",
-    "addressline2": "MERRIFIELD",
-    "pincode": None,
-    "referenceNumber": None,
-    "vlnNumber": None,
-    "applicantGroupId": 0,
-    "parentPassportNumber": "",
-    "parentPassportExpiry": "",
-    "dateOfDeparture": None,
-    "entryType": "",
-    "eoiVisaType": "",
-    "passportType": "",
-    "vfsReferenceNumber": "",
-    "familyReunificationCerificateNumber": "",
-    "PVRequestRefNumber": "",
-    "PVStatus": "",
-    "PVStatusDescription": "",
-    "PVCanAllowRetry": True,
-    "PVisVerified": False,
-    "eefRegistrationNumber": "",
-    "isAutoRefresh": True,
-    "helloVerifyNumber": "",
-    "OfflineCClink": "",
-    "idenfystatuscheck": False,
-    "vafStatus": None,
-    "SpecialAssistance": "",
-    "AdditionalRefNo": None,
-    "juridictionCode": "",
-    "canInitiateVAF": False,
-    "canEditVAF": False,
-    "canDeleteVAF": False,
-    "canDownloadVAF": False,
-    "Retryleft": "",
-    "ipAddress": "83.106.89.122",
+    "vfs@thesemantics.co": {
+        "api": {
+            "urn": "",
+            "arn": "",
+            "firstName": "AHMAR",
+            "employerFirstName": "",
+            "middleName": "",
+            "lastName": "ALI",
+            "employerLastName": "",
+            "salutation": "",
+            "gender": 1,
+            "nationalId": None,
+            "VisaToken": None,
+            "employerContactNumber": "",
+            "contactNumber": "07724267222",
+            "dialCode": "44",
+            "employerDialCode": "",
+            "passportNumber": "EK1812233",
+            "confirmPassportNumber": None,
+            "passportExpirtyDate": "03/09/2031",
+            "dateOfBirth": "09/08/1995",
+            "emailId": "UMARJAVED56@GMAIL.COM",
+            "employerEmailId": "",
+            "nationalityCode": "PAK",
+            "state": "HERTS",
+            "city": "WGC",
+            "isEndorsedChild": False,
+            "applicantType": 0,
+            "addressline1": "31",
+            "addressline2": "MERRIFIELD",
+            "pincode": None,
+            "referenceNumber": None,
+            "vlnNumber": None,
+            "applicantGroupId": 0,
+            "parentPassportNumber": "",
+            "parentPassportExpiry": "",
+            "dateOfDeparture": None,
+            "entryType": "",
+            "eoiVisaType": "",
+            "passportType": "",
+            "vfsReferenceNumber": "",
+            "familyReunificationCerificateNumber": "",
+            "PVRequestRefNumber": "",
+            "PVStatus": "",
+            "PVStatusDescription": "",
+            "PVCanAllowRetry": True,
+            "PVisVerified": False,
+            "eefRegistrationNumber": "",
+            "isAutoRefresh": True,
+            "helloVerifyNumber": "",
+            "OfflineCClink": "",
+            "idenfystatuscheck": False,
+            "vafStatus": None,
+            "SpecialAssistance": "",
+            "AdditionalRefNo": None,
+            "juridictionCode": "",
+            "canInitiateVAF": False,
+            "canEditVAF": False,
+            "canDeleteVAF": False,
+            "canDownloadVAF": False,
+            "Retryleft": "",
+            "ipAddress": "83.106.89.122",
+        },
+    },
 }
 
 TWILIO_CONFIG = {
@@ -160,27 +208,4 @@ GMAIL_CONFIG = {
 # Proxy for VFS requests (residential UK proxy)
 PROXY_CONFIG = {
     "proxy": "user-v12T4mAL03J9HGfz-type-residential-session-av7gkchx-country-gb-rotation-0:Kv72bsFi3VQh7f0N@geo.g-w.info:10080",
-}
-
-# Consolidated from the duplicate blobs previously hardcoded in
-# browser_client.py's call_add_applicant() and waitlist.json (which
-# disagreed on passport number/DOB/email between the two copies).
-# Sourced from waitlist.json as the more complete record - verify every
-# field against your actual passport/ID before relying on this for a real
-# booking. `gender` is the dropdown's visible option text, not VFS's
-# numeric code (1) - confirm "Male" is correct for the UI before use.
-APPLICANT_CONFIG = {
-    "vfs@thesemantics.co": {
-        "cover_letter_id": "",
-        "first_name": "AHMAR",
-        "last_name": "ALI",
-        "gender": "Male",
-        "date_of_birth": "09/08/1995",
-        "current_nationality": "PAKISTAN",
-        "passport_number": "EK1812233",
-        "passport_expiry_date": "03/09/2031",
-        "contact_dial_code": "44",
-        "contact_number": "07724267222",
-        "email": "UMARJAVED56@GMAIL.COM",
-    },
 }

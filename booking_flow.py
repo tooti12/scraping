@@ -22,11 +22,10 @@ from review_step import ReviewStep
 
 
 class BookingFlow:
-    def __init__(self, browser_client, bridge, email, applicant_config):
+    def __init__(self, browser_client, bridge, email):
         self.browser = browser_client
         self.bridge = bridge
         self.email = email
-        self.applicant_config = applicant_config
         self.captcha = CaptchaHandler(browser_client)
 
     def run(self, max_steps=30):
@@ -101,7 +100,34 @@ class BookingFlow:
 
     def _fill_applicant_form(self):
         filler = ApplicantFormFiller(self.browser)
-        filler.fill(self.applicant_config)
+
+        self.browser._log("  Fetching required fields from applicant form...")
+        # Angular may still be rendering the field controls the instant the
+        # Save button (our visibility trigger) appears, so a single
+        # immediate read can race it and come back empty — retry briefly
+        # before giving up and showing the user an empty form.
+        fields = filler.collect_fields()
+        for attempt in range(2, 4):
+            if fields:
+                break
+            self.browser._log(f"  No fields detected yet — retrying ({attempt}/3)...")
+            self.browser.sb.sleep(2)
+            fields = filler.collect_fields()
+        self.browser._log(
+            "  Found %d field(s): %s"
+            % (len(fields), [f"{f['label']}{'*' if f.get('required') else ''}" for f in fields])
+        )
+        self.bridge.push_status("applicant_fields_fetched", {"fields": fields})
+
+        values = self.bridge.ask(
+            "enter_applicant_details", {"login_user": self.email, "fields": fields}
+        ) or {}
+
+        self.browser._log("  Applicant details received from dashboard — filling form...")
+        unmatched = filler.fill_dynamic(fields, values)
+        if unmatched:
+            self.browser._log(f"  Field(s) left blank: {unmatched}")
+
         filler.save()
 
     def _handle_book_appointment(self):

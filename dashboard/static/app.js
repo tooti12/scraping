@@ -1,17 +1,74 @@
 const promptContainer = document.getElementById("prompt-container");
 const statusList = document.getElementById("status-list");
+const connDot = document.getElementById("conn-dot");
+const currentStep = document.getElementById("current-step");
+
+// Maps the raw event names pushed via FrontendBridge.push_status() to a
+// human-readable label and a severity used for log/badge coloring.
+const STEP_INFO = {
+  booking_flow_started: ["Booking started", "info"],
+  step_applicant_form: ["Filling applicant details", "info"],
+  applicant_fields_fetched: ["Applicant fields fetched from form", "info"],
+  step_otp: ["OTP verification", "info"],
+  otp_requested: ["OTP requested", "info"],
+  otp_fetch_failed: ["OTP fetch failed", "error"],
+  otp_verified: ["OTP verified", "success"],
+  otp_verification_failed: ["OTP verification failed", "error"],
+  step_applicant_summary: ["Reviewing applicant summary", "info"],
+  step_book_appointment: ["Selecting date & time", "info"],
+  date_selected: ["Date selected", "success"],
+  time_selected: ["Time selected", "success"],
+  step_review: ["Review & consent", "info"],
+  review_ready: ["Review ready", "info"],
+  review_cancelled: ["Review cancelled", "warning"],
+  terms_accepted: ["Terms accepted", "success"],
+  step_payment_disclaimer: ["Payment disclaimer", "info"],
+  step_payment: ["Payment", "info"],
+  payment_submitted: ["Payment submitted", "success"],
+  booking_flow_finished: ["Booking finished", "success"],
+};
+
+function describeEvent(event) {
+  return STEP_INFO[event] || [event.replace(/_/g, " "), "info"];
+}
+
+function setStep(label, level) {
+  currentStep.textContent = label;
+  currentStep.className = "topbar-step level-" + level;
+}
 
 function logStatus(event) {
+  const [label, level] = describeEvent(event.event);
+  setStep(label, level);
+
   const li = document.createElement("li");
-  const time = new Date(event.ts * 1000).toLocaleTimeString();
-  li.textContent = `[${time}] ${event.event}` + (event.payload && Object.keys(event.payload).length
-    ? ` - ${JSON.stringify(event.payload)}`
-    : "");
+  li.className = "level-" + level;
+
+  const time = document.createElement("span");
+  time.className = "log-time";
+  time.textContent = new Date(event.ts * 1000).toLocaleTimeString();
+  li.appendChild(time);
+
+  const headline = document.createElement("span");
+  headline.className = "log-event";
+  headline.textContent = label;
+  li.appendChild(headline);
+
+  if (event.payload && Object.keys(event.payload).length) {
+    const payload = document.createElement("span");
+    payload.className = "log-payload";
+    payload.textContent = JSON.stringify(event.payload);
+    li.appendChild(payload);
+  }
+
   statusList.prepend(li);
 }
 
 function clearPrompt() {
-  promptContainer.innerHTML = '<p class="muted">No action needed right now - waiting on the bot.</p>';
+  setStep("Working…", "info");
+  promptContainer.innerHTML =
+    '<div class="empty-state"><div class="spinner"></div>' +
+    '<p class="muted">No action needed right now — waiting on the bot.</p></div>';
 }
 
 function submitAnswer(promptId, value) {
@@ -22,19 +79,143 @@ function submitAnswer(promptId, value) {
   }).then(() => clearPrompt());
 }
 
+function el(tag, props, children) {
+  const node = document.createElement(tag);
+  Object.entries(props || {}).forEach(([k, v]) => {
+    if (k === "text") node.textContent = v;
+    else node[k] = v;
+  });
+  (children || []).forEach((c) => node.appendChild(c));
+  return node;
+}
+
+function infoGrid(pairs) {
+  const dl = el("dl", { className: "info-grid" });
+  pairs.forEach(([label, value]) => {
+    if (!value) return;
+    dl.appendChild(el("dt", { text: label }));
+    dl.appendChild(el("dd", { text: value }));
+  });
+  return dl;
+}
+
+// ── Prompt renderers ───────────────────────────────────────────────────
+
+function renderBookingPrompt(promptId, payload) {
+  const box = el("div", { className: "prompt-box" });
+  box.appendChild(el("h3", { text: "Slot available — proceed to booking?" }));
+  box.appendChild(
+    infoGrid([
+      ["Country", (payload.country || "").toUpperCase()],
+      ["Centre", payload.centre],
+      ["Category", payload.appt_cat],
+      ["Sub-category", payload.sub_cat],
+      ["Slot", payload.slot_details],
+    ])
+  );
+
+  const actions = el("div", { className: "actions" });
+  actions.appendChild(
+    el("button", {
+      className: "primary",
+      text: "Yes, book this slot",
+      onclick: () => submitAnswer(promptId, { confirmed: true }),
+    })
+  );
+  actions.appendChild(
+    el("button", {
+      className: "danger",
+      text: "No, check other countries",
+      onclick: () => submitAnswer(promptId, { confirmed: false }),
+    })
+  );
+  box.appendChild(actions);
+  return box;
+}
+
+function renderApplicantPrompt(promptId, payload) {
+  const box = el("div", { className: "prompt-box" });
+  box.appendChild(
+    el("h3", {
+      text:
+        "Enter applicant details" +
+        (payload.login_user ? " (" + payload.login_user + ")" : ""),
+    })
+  );
+
+  // Fields are discovered live from the VFS form, not hard-coded — each
+  // entry's label/required-ness reflects exactly what that country/visa
+  // category currently shows, so this form is built dynamically.
+  const fields = payload.fields || [];
+  const form = el("form");
+  const inputs = {};
+
+  if (!fields.length) {
+    form.appendChild(
+      el("p", {
+        className: "muted field-full",
+        text: "No fields were detected on the applicant form.",
+      })
+    );
+  }
+
+  fields.forEach((f) => {
+    const label = el("label", {});
+    label.appendChild(
+      document.createTextNode(f.label)
+    );
+    if (f.required) {
+      label.appendChild(el("span", { className: "req-mark", text: "*" }));
+    }
+    const input = el("input", {
+      type: "text",
+      name: f.label,
+      autocomplete: "off",
+      required: !!f.required,
+    });
+    inputs[f.label] = input;
+    label.appendChild(input);
+    form.appendChild(label);
+  });
+
+  const submitBtn = el("button", {
+    type: "submit",
+    className: "primary field-full",
+    text: "Submit applicant details",
+  });
+  form.appendChild(submitBtn);
+
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const value = {};
+    fields.forEach((f) => {
+      value[f.label] = inputs[f.label].value;
+    });
+    submitAnswer(promptId, value);
+    form.reset();
+  };
+
+  box.appendChild(form);
+  return box;
+}
+
 function renderDatePrompt(promptId, payload) {
-  const box = document.createElement("div");
-  box.className = "prompt-box";
-  box.innerHTML = "<h3>Select an appointment date</h3>";
+  const box = el("div", { className: "prompt-box" });
+  box.appendChild(el("h3", { text: "Select an appointment date" }));
+
+  const grid = el("div", { className: "slot-grid" });
   (payload.dates || []).forEach((d) => {
-    const btn = document.createElement("button");
-    btn.textContent = `${d.label} (${d.date})`;
-    btn.onclick = () => submitAnswer(promptId, d.date);
-    box.appendChild(btn);
+    grid.appendChild(
+      el("button", {
+        text: `${d.label} (${d.date})`,
+        onclick: () => submitAnswer(promptId, d.date),
+      })
+    );
   });
   if (!payload.dates || !payload.dates.length) {
-    box.appendChild(document.createTextNode("No available dates were found."));
+    grid.appendChild(el("p", { className: "muted", text: "No available dates were found." }));
   }
+  box.appendChild(grid);
   return box;
 }
 
@@ -46,36 +227,40 @@ function periodOf(time) {
 }
 
 function renderTimePrompt(promptId, payload) {
-  const box = document.createElement("div");
-  box.className = "prompt-box";
-  const heading = document.createElement("h3");
-  heading.textContent = `Select an appointment time${payload.date ? " (" + payload.date + ")" : ""}`;
-  box.appendChild(heading);
+  const box = el("div", { className: "prompt-box" });
+  box.appendChild(
+    el("h3", {
+      text: "Select an appointment time" + (payload.date ? " (" + payload.date + ")" : ""),
+    })
+  );
 
-  const filterSelect = document.createElement("select");
+  const filterWrap = el("div", { className: "period-filter" });
+  const filterSelect = el("select");
   ["All", "Morning", "Afternoon", "Evening"].forEach((period) => {
-    const opt = document.createElement("option");
-    opt.value = period;
-    opt.textContent = period;
-    filterSelect.appendChild(opt);
+    filterSelect.appendChild(el("option", { value: period, text: period }));
   });
-  box.appendChild(filterSelect);
+  filterWrap.appendChild(filterSelect);
+  box.appendChild(filterWrap);
 
-  const list = document.createElement("div");
-  box.appendChild(list);
+  const grid = el("div", { className: "time-grid" });
+  box.appendChild(grid);
 
   function renderList() {
-    list.innerHTML = "";
+    grid.innerHTML = "";
     const period = filterSelect.value;
+    let any = false;
     (payload.times || []).forEach((t) => {
       if (period !== "All" && periodOf(t.time) !== period) return;
-      const btn = document.createElement("button");
-      btn.textContent = t.time;
-      btn.onclick = () => submitAnswer(promptId, t.row_id);
-      list.appendChild(btn);
+      any = true;
+      grid.appendChild(
+        el("button", {
+          text: t.time,
+          onclick: () => submitAnswer(promptId, t.row_id),
+        })
+      );
     });
-    if (!list.children.length) {
-      list.textContent = "No times in this filter.";
+    if (!any) {
+      grid.appendChild(el("p", { className: "muted", text: "No times in this filter." }));
     }
   }
   filterSelect.onchange = renderList;
@@ -85,35 +270,56 @@ function renderTimePrompt(promptId, payload) {
 }
 
 function renderReviewPrompt(promptId, payload) {
-  const box = document.createElement("div");
-  box.className = "prompt-box";
-  box.innerHTML = "<h3>Confirm booking before payment</h3>";
+  const box = el("div", { className: "prompt-box" });
+  box.appendChild(el("h3", { text: "Confirm booking before payment" }));
 
-  const pre = document.createElement("pre");
-  pre.textContent = JSON.stringify(payload, null, 2);
-  box.appendChild(pre);
+  if (payload.applicant_name) {
+    box.appendChild(
+      el("p", { className: "muted", text: "Applicant: " + payload.applicant_name })
+    );
+  }
 
-  const confirmBtn = document.createElement("button");
-  confirmBtn.textContent = "Confirm and proceed";
-  confirmBtn.onclick = () => submitAnswer(promptId, { confirmed: true });
-  box.appendChild(confirmBtn);
+  const details = payload.details || {};
+  if (Object.keys(details).length) {
+    const table = el("table", { className: "review-table" });
+    Object.entries(details).forEach(([label, value]) => {
+      table.appendChild(el("tr", {}, [el("td", { text: label }), el("td", { text: value })]));
+    });
+    box.appendChild(table);
+  }
 
-  const cancelBtn = document.createElement("button");
-  cancelBtn.textContent = "Cancel";
-  cancelBtn.onclick = () => submitAnswer(promptId, { confirmed: false });
-  box.appendChild(cancelBtn);
+  if (payload.total) {
+    box.appendChild(el("div", { className: "review-total", text: "Total: " + payload.total }));
+  }
 
+  const actions = el("div", { className: "actions" });
+  actions.appendChild(
+    el("button", {
+      className: "primary",
+      text: "Confirm and proceed",
+      onclick: () => submitAnswer(promptId, { confirmed: true }),
+    })
+  );
+  actions.appendChild(
+    el("button", {
+      className: "danger",
+      text: "Go back",
+      onclick: () => submitAnswer(promptId, { confirmed: false }),
+    })
+  );
+  box.appendChild(actions);
   return box;
 }
 
 function renderCardPrompt(promptId, payload) {
-  const box = document.createElement("div");
-  box.className = "prompt-box";
-  const heading = document.createElement("h3");
-  heading.textContent = `Enter payment card details${payload.total ? " (Total: " + payload.total + ")" : ""}`;
-  box.appendChild(heading);
+  const box = el("div", { className: "prompt-box" });
+  box.appendChild(
+    el("h3", {
+      text: "Enter payment card details" + (payload.total ? " (Total: " + payload.total + ")" : ""),
+    })
+  );
 
-  const form = document.createElement("form");
+  const form = el("form");
   const fields = [
     { name: "holder_name", label: "Holder Name", type: "text" },
     { name: "card_number", label: "Card Number", type: "text" },
@@ -123,20 +329,25 @@ function renderCardPrompt(promptId, payload) {
   ];
   const inputs = {};
   fields.forEach((f) => {
-    const label = document.createElement("label");
-    label.textContent = f.label;
-    const input = document.createElement("input");
-    input.type = f.type;
-    input.name = f.name;
-    input.autocomplete = "off";
+    const label = el("label", { text: f.label });
+    const input = el("input", { type: f.type, name: f.name, autocomplete: "off" });
     inputs[f.name] = input;
     label.appendChild(input);
     form.appendChild(label);
   });
 
-  const submitBtn = document.createElement("button");
-  submitBtn.type = "submit";
-  submitBtn.textContent = "Submit payment";
+  form.appendChild(
+    el("p", {
+      className: "security-note",
+      text: "Card details go straight to VFS's payment processor — never logged or stored by this dashboard.",
+    })
+  );
+
+  const submitBtn = el("button", {
+    type: "submit",
+    className: "primary field-full",
+    text: "Submit payment",
+  });
   form.appendChild(submitBtn);
 
   form.onsubmit = (e) => {
@@ -154,6 +365,8 @@ function renderCardPrompt(promptId, payload) {
 }
 
 const PROMPT_RENDERERS = {
+  confirm_booking: renderBookingPrompt,
+  enter_applicant_details: renderApplicantPrompt,
   select_date: renderDatePrompt,
   select_time: renderTimePrompt,
   confirm_review: renderReviewPrompt,
@@ -163,6 +376,7 @@ const PROMPT_RENDERERS = {
 function renderPrompt(msg) {
   const renderer = PROMPT_RENDERERS[msg.prompt_type];
   promptContainer.innerHTML = "";
+  setStep("Action required", "warning");
   if (!renderer) {
     promptContainer.textContent = `Unknown prompt type: ${msg.prompt_type}`;
     return;
@@ -170,7 +384,17 @@ function renderPrompt(msg) {
   promptContainer.appendChild(renderer(msg.prompt_id, msg.payload || {}));
 }
 
+// ── SSE connection ──────────────────────────────────────────────────────
+
 const eventSource = new EventSource("/events");
+
+eventSource.onopen = () => {
+  connDot.className = "dot connected";
+};
+eventSource.onerror = () => {
+  connDot.className = "dot disconnected";
+};
+
 eventSource.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   if (msg.type === "status") {
