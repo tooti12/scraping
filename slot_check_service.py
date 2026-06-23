@@ -1,6 +1,7 @@
 # slot_check_service.py
-"""Booking-free VFS slot check used by the public slot-checker
-homepage (dashboard/app.py's /api/check/<country> route).
+"""Booking-free VFS slot check used by slot_status_cache.py's continuous
+background loop, which keeps the public slot-checker homepage's per-country
+status cache fresh.
 
 Runs headed (not headless) — Cloudflare's challenge is solved via
 SeleniumBase's uc_gui_click_captcha(), which drives a real OS-level mouse
@@ -16,7 +17,7 @@ from browser_client import BrowserClient
 from config import SHARED_VFS_ACCOUNT
 
 
-def check_country_slot(country: str, on_status=None, on_browser=None) -> dict:
+def check_country_slot(country: str, on_status=None, on_browser=None, login_lock=None) -> dict:
     """Run one slot check for `country`. Always returns a dict
     with a "status" key: "slots_available" | "no_slots" | "error".
 
@@ -27,7 +28,15 @@ def check_country_slot(country: str, on_status=None, on_browser=None) -> dict:
 
     on_browser, if given, is called once with the live BrowserClient as soon
     as it exists — dashboard/app.py uses this to stash a handle to it so a
-    user-initiated cancel can force-quit the Chrome session mid-check."""
+    user-initiated cancel can force-quit the Chrome session mid-check.
+
+    login_lock, if given, is a lock (a multiprocessing.Lock in practice)
+    shared across every concurrently-running call (see slot_status_cache.py)
+    — passed straight
+    through to AuthHandler, which holds it only for the part of login that
+    touches the one shared Gmail inbox (click login through OTP verified),
+    so two countries' sessions can never have an OTP email in flight at the
+    same time."""
 
     def emit(event):
         if on_status:
@@ -47,7 +56,7 @@ def check_country_slot(country: str, on_status=None, on_browser=None) -> dict:
                     on_browser(browser)
                 except Exception:
                     pass
-            auth = AuthHandler(country, email, password, browser, on_status=emit)
+            auth = AuthHandler(country, email, password, browser, on_status=emit, login_lock=login_lock)
             token = auth.authenticate()
             if token is None:
                 return {"status": "error", "message": "Could not log in to VFS right now."}

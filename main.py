@@ -325,12 +325,13 @@ if __name__ == "__main__":
     print("Screen-awake thread started.")
     bridge = FrontendBridge()
 
-    # Default: dashboard only — no browser opens until a visitor clicks a
-    # country card on the homepage (see dashboard/app.py's /api/check route
-    # and slot_check_service.py), which runs a one-off, single-country
-    # check. Pass --monitor to instead run the old always-on, all-countries
-    # continuous booking monitor (opens its own browser immediately and
-    # loops forever — unrelated to the on-demand frontend checks).
+    # Default: dashboard only — no browser opens until a visitor clicks
+    # "Start Bot" on /availability (dashboard/app.py's /api/start-bot),
+    # which kicks off slot_status_cache.py's background loop to keep that
+    # page's cached per-country status fresh from then on. Pass --monitor
+    # to instead run the old always-on, all-countries continuous booking
+    # monitor (opens its own browser immediately and loops forever —
+    # unrelated to the availability page's cached status).
     if "--monitor" in sys.argv:
         print("VFS Appointment Scraper — multi-country continuous monitor")
         print("=" * 50)
@@ -345,7 +346,10 @@ if __name__ == "__main__":
     else:
         print("VFS Slot Checker — dashboard only (no browser will open yet)")
         print("=" * 50)
-        print("Visit http://127.0.0.1:5050 and pick a country to check for slots.")
+        print("Visit http://127.0.0.1:5050/availability and click 'Start Bot'")
+        print("to begin checking. Each country runs in its own process, so the")
+        print("first pass can take a few minutes before results appear — watch")
+        print("the console output below for progress.")
         print("(Run 'python main.py --monitor' for the old continuous booking monitor instead.)")
         print("=" * 50)
         run_dashboard(bridge)

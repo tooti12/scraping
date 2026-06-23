@@ -1,9 +1,10 @@
 # auth_handler.py
+import contextlib
 import time
 
 
 class AuthHandler:
-    def __init__(self, country, email, password, browser_client, on_status=None):
+    def __init__(self, country, email, password, browser_client, on_status=None, login_lock=None):
         self.country = country
         self.email = email
         self.password = password
@@ -13,6 +14,16 @@ class AuthHandler:
         # None for every other caller (main.py's monitor) — zero behavior
         # change there.
         self.on_status = on_status
+        # Optional lock (a multiprocessing.Lock in practice — see
+        # slot_status_cache.py, which runs each country in its own process)
+        # shared across every concurrently-running country session. All
+        # countries share one Gmail inbox for OTPs, so the window from
+        # "click login" (which triggers VFS to send the OTP email) through
+        # "OTP verified" must run for one country at a time — otherwise two
+        # sessions' OTP emails could arrive close together and get
+        # attributed to the wrong session. None for every other caller,
+        # which only ever runs one session at a time anyway.
+        self.login_lock = login_lock
 
     def _emit(self, event):
         if self.on_status:
@@ -34,19 +45,30 @@ class AuthHandler:
 
         print("[AuthHandler] IP not blocked. Handling cookie banner...")
         self.browser.handle_cookies()
-        print("[AuthHandler] Entering credentials...")
-        self._enter_credentials()
-        print("[AuthHandler] Credentials submitted. Checking for IP block after login...")
-        self.browser._log_state("After submitting credentials")
+        print("[AuthHandler] Typing credentials...")
+        self._type_credentials()
 
-        if self.browser.check_is_ip_blocked():
-            print("[AuthHandler] IP blocked after credential entry — aborting.")
-            self.browser._log_state("Authentication aborted — IP blocked after credentials")
-            return None
+        # Everything from here through OTP verification touches the one
+        # shared Gmail inbox (clicking login is what makes VFS send the
+        # email) — serialized across concurrent country sessions so two
+        # sessions' OTP emails can never be in flight at the same time.
+        # Typing credentials above doesn't touch Gmail, so it stays outside
+        # the lock and can run fully in parallel with other sessions.
+        lock = self.login_lock if self.login_lock is not None else contextlib.nullcontext()
+        with lock:
+            print("[AuthHandler] Submitting login...")
+            self._submit_login()
+            print("[AuthHandler] Credentials submitted. Checking for IP block after login...")
+            self.browser._log_state("After submitting credentials")
 
-        print("[AuthHandler] No IP block. Waiting for OTP prompt and fetching OTP from email...")
-        self._submit_otp(email=self.email)
-        self.browser._log_state("After OTP submission")
+            if self.browser.check_is_ip_blocked():
+                print("[AuthHandler] IP blocked after credential entry — aborting.")
+                self.browser._log_state("Authentication aborted — IP blocked after credentials")
+                return None
+
+            print("[AuthHandler] No IP block. Waiting for OTP prompt and fetching OTP from email...")
+            self._submit_otp(email=self.email)
+            self.browser._log_state("After OTP submission")
         try:
             self.browser.sb.sleep(3)
             print("[AuthHandler] Reading JWT from sessionStorage...")
@@ -62,7 +84,9 @@ class AuthHandler:
             self.browser.sb.sleep(200)
             return None
 
-    def _enter_credentials(self):
+    def _type_credentials(self):
+        # Pure text input, no shared resource and no OS-level click — safe
+        # to run for every country session in parallel, outside login_lock.
         self.browser.sb.sleep(2)
         print(f"[AuthHandler] Typing email: {self.email}")
         try:
@@ -78,6 +102,12 @@ class AuthHandler:
             self.browser.sb.type('input[name="password"]', self.password)
         print("[AuthHandler] Waiting for login button...")
         self.browser.sb.wait_for_element("button.mat-btn-lg", timeout=50)
+
+    def _submit_login(self):
+        # Solves the pre-login Cloudflare captcha (a real OS-level click —
+        # safe here because each session has its own isolated virtual
+        # display, see browser_client.py) and clicks Login, which is what
+        # makes VFS send the OTP email. Called inside login_lock.
         print("[AuthHandler] Solving captcha (post-credential)...")
         self.browser.solve_captcha()
         print("[AuthHandler] Clicking login button...")

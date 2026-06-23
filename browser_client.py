@@ -258,6 +258,16 @@ class BrowserClient:
             "incognito": True,
             "headless2": headless,
             "chromium_arg": ",".join(chromium_args),
+            # Each session gets its own isolated virtual display before
+            # Chrome launches (native SeleniumBase/sbvirtualdisplay support —
+            # no-ops automatically on non-Linux). Running several countries'
+            # sessions concurrently means several Chrome windows solving
+            # Cloudflare captchas at once, and uc_gui_click_captcha()'s click
+            # is an absolute OS-level screen coordinate with no window
+            # targeting — without separate displays, one session's click
+            # could land on another session's window.
+            "xvfb": True,
+            "xvfb_metrics": "1920,1080",
         }
 
         self._local_proxy: LocalAuthProxy | None = None
@@ -412,12 +422,12 @@ class BrowserClient:
         """
         try:
             url = self.sb.get_current_url()
-        except Exception:
-            url = "<unknown>"
+        except Exception as e:
+            url = f"<unknown: {type(e).__name__}: {e}>"
         try:
             title = self.sb.get_title()
-        except Exception:
-            title = "<unknown>"
+        except Exception as e:
+            title = f"<unknown: {type(e).__name__}: {e}>"
         self._log(f"  [STATE] {action} | url={url} | title={title!r}")
 
     def switch_tabs(self):
@@ -655,8 +665,8 @@ class BrowserClient:
             self._log("  Captcha solved — clicking Submit...")
             self.sb.driver.uc_click("app-cloudflare-dialog button.mat-btn-lg")
             self.sb.sleep(3)
-        except Exception:
-            self._log("  No captcha modal (auto-passed or not required).")
+        except Exception as e:
+            self._log(f"  No captcha modal (auto-passed or not required) — {type(e).__name__}: {e}")
 
         self._log_state("After submit / captcha handling")
 
@@ -696,8 +706,8 @@ class BrowserClient:
                 return "slots_available", slot_details
             if slot_details:
                 return "no_slots", slot_details
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"  No result banner within timeout — {type(e).__name__}: {e}")
 
         # Fallback: no recognized banner element — check for an enabled
         # proceed button, which only appears when slots are available.
@@ -705,8 +715,8 @@ class BrowserClient:
             self.sb.wait_for_element("button.mat-btn-lg:not([disabled])", timeout=8)
             slot_details = _read_info_banner()
             return "slots_available", slot_details
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"  No enabled proceed button either — {type(e).__name__}: {e}")
 
         # Last resort: the banner text wasn't caught by any selector above —
         # scan the raw page source for VFS's known "no slots" phrasing so a
@@ -715,9 +725,10 @@ class BrowserClient:
             page_text = self.sb.get_page_source().lower()
             if "no appointment slots" in page_text or "sorry but no" in page_text:
                 return "no_slots", "No appointment slots are currently available."
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"  get_page_source() fallback failed — {type(e).__name__}: {e}")
 
+        self._log("  _submit_and_read_result: no banner, no proceed button, no recognizable page text — returning error.")
         return "error", ""
 
     # ------------------------------------------------------------------

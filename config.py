@@ -214,7 +214,11 @@ GMAIL_CONFIG = {
     "app_password": os.environ["GMAIL_APP_PASSWORD"],  # App password without spaces
 }
 
-# Proxy for VFS requests (residential UK proxy)
+# Proxy for VFS requests (residential UK proxy) — one shared proxy, used
+# independently by every country's session: each BrowserClient instance
+# opens its own LocalAuthProxy forwarder and its own incognito Chrome
+# profile, so concurrent sessions never share a connection or any state
+# even though they go through the same upstream proxy.
 PROXY_CONFIG = {
     "proxy": os.environ["VFS_PROXY_URL"],
 }

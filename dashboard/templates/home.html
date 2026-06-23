@@ -31,14 +31,14 @@
 
   <header class="hero" id="top">
     <div class="hero-copy">
-      <span class="eyebrow"><span class="live-dot"></span> Live checks against VFS Global — no cached data</span>
-      <h1>Check VFS visa appointment <span class="grad">availability in seconds</span></h1>
+      <span class="eyebrow"><span class="live-dot"></span> Auto-checked against VFS Global every few minutes</span>
+      <h1>VFS visa appointment <span class="grad">availability, always up to date</span></h1>
       <p>
-        Stop manually refreshing the VFS website. Pick your destination country and our bot
-        checks VFS Global for an open appointment slot right now.
+        Stop manually refreshing the VFS website. Our bot continuously checks VFS Global for
+        every destination below — open the availability page any time to see the current result.
       </p>
-      <a class="hero-cta" href="#countries">
-        Check a country
+      <a class="hero-cta" href="/availability">
+        Check availability
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </a>
       <div class="scope-badges">
@@ -69,24 +69,24 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         </div>
         <span class="step-number">STEP 1</span>
-        <h3>Pick your destination</h3>
-        <p class="muted">Choose the country you're applying to from the list below.</p>
+        <h3>We check VFS continuously</h3>
+        <p class="muted">A bot logs in to VFS Global and re-checks every destination on a loop, around the clock.</p>
       </div>
       <div class="step-card">
         <div class="step-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h.01M15 9h.01M9 15c.7.8 1.8 1.3 3 1.3s2.3-.5 3-1.3"/></svg>
         </div>
         <span class="step-number">STEP 2</span>
-        <h3>We check VFS for you</h3>
-        <p class="muted">Our bot logs in to VFS Global and checks live appointment availability.</p>
+        <h3>Results are cached here</h3>
+        <p class="muted">Every result is kept up to date in the background — no need to trigger a check yourself.</p>
       </div>
       <div class="step-card">
         <div class="step-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/></svg>
         </div>
         <span class="step-number">STEP 3</span>
-        <h3>Get an instant result</h3>
-        <p class="muted">See immediately whether a slot is open, and which centre and category it's under.</p>
+        <h3>Just look it up</h3>
+        <p class="muted">See immediately whether a slot is open, which centre and category it's under, and when it was last checked.</p>
       </div>
     </div>
   </section>
@@ -101,8 +101,8 @@
         <div class="feature-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
         </div>
-        <h3>Real-time checks</h3>
-        <p class="muted">Every click runs a live check against VFS Global — never cached or stale data.</p>
+        <h3>Continuously refreshed</h3>
+        <p class="muted">Every destination is re-checked against VFS Global on a loop, so results never go stale for long.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">
@@ -124,7 +124,7 @@
   <main class="section" id="countries">
     <div class="section-head">
       <span class="section-kicker">Destinations</span>
-      <h2 class="section-title">Select a country</h2>
+      <h2 class="section-title">Countries we cover</h2>
     </div>
     {% set flag_svgs = {
       "dnk": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#c8102e"/><rect x="10" width="4" height="20" fill="#fff"/><rect y="8" width="30" height="4" fill="#fff"/></svg>',
@@ -135,18 +135,20 @@
     {% set default_flag = '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#232838"/><circle cx="15" cy="10" r="6" fill="none" stroke="#5b6376" stroke-width="1"/></svg>' %}
     <div class="country-grid">
       {% for c in countries %}
-      <button class="country-card" data-country="{{ c.code }}" data-name="{{ c.name }}">
+      <div class="country-card">
         <div class="country-head">
           <span class="country-flag">{{ flag_svgs.get(c.code, default_flag)|safe }}</span>
           <span class="country-code">{{ c.code|upper }}</span>
         </div>
         <span class="country-name">{{ c.name }}</span>
-        <span class="country-cta">
-          Check availability
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-        </span>
-      </button>
+      </div>
       {% endfor %}
+    </div>
+    <div class="countries-cta">
+      <a class="hero-cta" href="/availability">
+        Check availability
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
     </div>
   </main>
 
@@ -162,6 +164,6 @@
     <div class="result-box" id="result-box"></div>
   </div>
 
-  <script src="/static/home.js"></script>
+  <script src="/static/coming-soon.js"></script>
 </body>
 </html>

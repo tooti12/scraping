@@ -227,15 +227,35 @@ a {
   color: #fff;
   font-weight: 600;
   font-size: 0.95rem;
+  font-family: inherit;
   text-decoration: none;
+  border: none;
   border-radius: 10px;
   box-shadow: 0 12px 28px -10px var(--accent-soft);
+  cursor: pointer;
   transition: background 0.15s, transform 0.15s;
 }
 
 .hero-cta:hover {
   background: var(--accent-strong);
   transform: translateY(-1px);
+}
+
+.hero-cta:disabled {
+  opacity: 0.7;
+  cursor: wait;
+  transform: none;
+}
+
+.hero-cta--running {
+  background: var(--success);
+  box-shadow: none;
+  cursor: default;
+}
+
+.hero-cta--running:hover {
+  background: var(--success);
+  transform: none;
 }
 
 .hero-cta svg {
@@ -445,6 +465,12 @@ a {
   gap: 1rem;
 }
 
+.countries-cta {
+  display: flex;
+  justify-content: center;
+  margin-top: 2.5rem;
+}
+
 .country-card {
   display: flex;
   flex-direction: column;
@@ -455,24 +481,9 @@ a {
   border-radius: var(--radius);
   padding: 1.4rem;
   color: var(--text);
-  cursor: pointer;
   text-align: left;
   font-family: inherit;
   box-shadow: var(--shadow-card);
-  transition: border-color 0.15s, transform 0.15s, background 0.15s;
-}
-
-.country-card:hover {
-  border-color: var(--accent);
-  background: var(--surface-hover);
-  transform: translateY(-3px);
-}
-
-.country-card:disabled,
-.country-card.checking {
-  cursor: wait;
-  opacity: 0.7;
-  transform: none;
 }
 
 .country-head {
@@ -512,23 +523,39 @@ a {
   font-weight: 600;
 }
 
-.country-cta {
+.country-status {
   margin-top: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.status-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+}
+
+.status-badge.status-success { color: var(--success); background: var(--success-soft); }
+.status-badge.status-empty { color: var(--muted); background: var(--surface-hover); }
+.status-badge.status-error { color: var(--danger); background: var(--danger-soft); }
+
+.status-detail {
+  margin: 0;
   font-size: 0.82rem;
   color: var(--muted);
+  line-height: 1.45;
 }
 
-.country-cta svg {
-  width: 13px;
-  height: 13px;
-  transition: transform 0.15s;
-}
-
-.country-card:hover .country-cta svg {
-  transform: translateX(2px);
+.status-time {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--faint);
 }
 
 /* ── Footer ────────────────────────────────────────────── */
@@ -596,9 +623,6 @@ a {
   align-items: center;
 }
 
-/* Loading state floats directly on the dim backdrop — no card chrome —
-   per design: only the result (and the cancellable circular loader) should
-   read as "boxed" UI. */
 #result-box.boxed {
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -622,100 +646,6 @@ a {
 
 .modal-close:hover {
   color: var(--text);
-}
-
-/* Loading state */
-
-.result-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.1rem;
-  text-align: center;
-  padding: 0.6rem 0 0.2rem;
-}
-
-.result-loading p {
-  margin: 0;
-}
-
-.result-loading .loading-title {
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--text);
-}
-
-/* Circular, cancellable loader — hover swaps the progress ring for a cross
-   so it's obvious clicking it stops the check; it floats directly on the
-   dim backdrop (#result-box has no .boxed card during loading). */
-.loader-circle {
-  position: relative;
-  width: 96px;
-  height: 96px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.loader-ring {
-  width: 100%;
-  height: 100%;
-  transform: rotate(-90deg);
-  transition: opacity 0.15s;
-}
-
-.loader-track {
-  fill: none;
-  stroke: var(--border-strong);
-  stroke-width: 6;
-}
-
-.loader-arc {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 6;
-  stroke-linecap: round;
-  stroke-dasharray: 213.6;
-  stroke-dashoffset: 213.6;
-  transition: stroke-dashoffset 0.6s ease;
-}
-
-.loader-cancel {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
-  color: var(--danger);
-}
-
-.loader-cancel svg {
-  width: 28px;
-  height: 28px;
-}
-
-.loader-circle:hover .loader-ring {
-  opacity: 0;
-}
-
-.loader-circle:hover .loader-cancel {
-  opacity: 1;
-  background: var(--danger-soft);
-}
-
-.loading-status {
-  color: var(--muted);
-  font-size: 0.85rem;
-  min-height: 1.2em;
-}
-
-.loading-hint {
-  color: var(--faint);
-  font-size: 0.74rem;
 }
 
 /* Result state */

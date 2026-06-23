@@ -157,7 +157,7 @@ function logStatus(event) {
 function clearPrompt() {
   setStep("Working…", "info");
   promptContainer.innerHTML =
-    '<div class="empty-state"><div class="spinner"></div>' +
+    '<div class="empty-state"><span class="loader"></span>' +
     '<p class="muted">No action needed right now — waiting on the bot.</p></div>';
 }
 
