@@ -20,6 +20,9 @@ locked down (auth, or removed from the public process entirely) — only the
 """
 import json
 import logging
+import queue
+import threading
+import uuid
 
 from flask import Flask, Response, jsonify, render_template, request
 
@@ -33,6 +36,14 @@ def create_app(bridge):
     app = Flask(__name__)
     app.config["bridge"] = bridge
 
+    # check_id -> queue.Queue(), one per in-flight /api/check call. Lets the
+    # frontend open an SSE stream scoped to *its own* check instead of a
+    # global broadcast — important since the slot-checker (unlike /booking)
+    # is meant to be multi-visitor, so two people checking at once must
+    # never see each other's progress events.
+    check_queues = {}
+    check_queues_lock = threading.Lock()
+
     @app.route("/")
     def home():
         return render_template("home.html", countries=COUNTRIES)
@@ -45,7 +56,43 @@ def create_app(bridge):
     def api_check(country):
         if country not in _COUNTRY_CODES:
             return jsonify({"status": "error", "message": "Unknown country."}), 404
-        return jsonify(check_country_slot(country))
+
+        check_id = uuid.uuid4().hex
+        status_queue = queue.Queue()
+        with check_queues_lock:
+            check_queues[check_id] = status_queue
+
+        def on_status(event):
+            status_queue.put({"type": "status", "event": event})
+
+        def worker():
+            try:
+                result = check_country_slot(country, on_status=on_status)
+            except Exception:
+                result = {"status": "error", "message": "Something went wrong while checking. Please try again."}
+            status_queue.put({"type": "result", "data": result})
+
+        threading.Thread(target=worker, daemon=True).start()
+        return jsonify({"check_id": check_id})
+
+    @app.route("/api/check-stream/<check_id>")
+    def check_stream(check_id):
+        status_queue = check_queues.get(check_id)
+        if status_queue is None:
+            return Response(status=404)
+
+        def stream():
+            try:
+                while True:
+                    event = status_queue.get()
+                    yield f"data: {json.dumps(event)}\n\n"
+                    if event["type"] == "result":
+                        break
+            finally:
+                with check_queues_lock:
+                    check_queues.pop(check_id, None)
+
+        return Response(stream(), mimetype="text/event-stream")
 
     @app.route("/events")
     def events():

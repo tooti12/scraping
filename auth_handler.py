@@ -3,14 +3,27 @@ import time
 
 
 class AuthHandler:
-    def __init__(self, country, email, password,browser_client):
+    def __init__(self, country, email, password, browser_client, on_status=None):
         self.country = country
         self.email = email
         self.password = password
         self.browser = browser_client
+        # Optional callback(event_name: str) used by slot_check_service.py to
+        # mirror real login/OTP progress to the public checker's frontend.
+        # None for every other caller (main.py's monitor) — zero behavior
+        # change there.
+        self.on_status = on_status
+
+    def _emit(self, event):
+        if self.on_status:
+            try:
+                self.on_status(event)
+            except Exception:
+                pass
 
     def authenticate(self):
         print(f"[AuthHandler] Opening VFS login page for country={self.country} ...")
+        self._emit("logging_in")
         self.browser.open_login_page()
         print("[AuthHandler] Login page loaded.")
 
@@ -40,6 +53,7 @@ class AuthHandler:
             auth_token = self.browser.get_auth_token()
             if auth_token:
                 print(f"[AuthHandler] JWT obtained successfully (length={len(auth_token)}).")
+                self._emit("session_ready")
             else:
                 print("[AuthHandler] JWT not found in sessionStorage after OTP submission.")
             return auth_token
@@ -95,6 +109,7 @@ class AuthHandler:
         print("[AuthHandler] Waiting for OTP input field to appear (#mat-input-3)...")
         self.browser.sb.wait_for_element("#mat-input-3", timeout=50)
         print("[AuthHandler] OTP field found. Sleeping 20s to let email arrive...")
+        self._emit("awaiting_otp")
         self.browser.sb.sleep(20)
 
         print("[AuthHandler] Fetching OTP from email inbox...")
@@ -105,6 +120,7 @@ class AuthHandler:
             return
 
         print(f"[AuthHandler] OTP received: {otp}")
+        self._emit("verifying_otp")
         print("[AuthHandler] Solving captcha before OTP entry...")
         self.browser.solve_captcha()
         print("[AuthHandler] Typing OTP into field...")

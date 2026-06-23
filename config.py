@@ -1,4 +1,13 @@
 # config.py
+"""Secrets (VFS account, Gmail/Twilio/proxy credentials) are read from the
+environment — see .env (gitignored, not committed) and DEPLOYMENT.md. Load
+order: real env vars set by systemd/the shell win; .env fills in the rest
+for local dev via python-dotenv."""
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Countries shown as cards on the public slot-checker homepage
 # (dashboard/templates/home.html). Each "code" must have a COUNTRY_CONFIG
@@ -16,8 +25,8 @@ COUNTRIES = [
 # account, same as main.py's monitor does today. Per-visitor credentials can
 # replace this once the product needs real multi-tenant accounts.
 SHARED_VFS_ACCOUNT = {
-    "email": "umar.jwork@gmail.com",
-    "password": "P@ssword123",
+    "email": os.environ["VFS_EMAIL"],
+    "password": os.environ["VFS_PASSWORD"],
 }
 
 COUNTRY_CONFIG = {
@@ -187,25 +196,25 @@ APPLICANT_CONFIG = {
 }
 
 TWILIO_CONFIG = {
-    "account_sid": "AC0ce99e0bd3abd7748fa67cd01607c54e",
-    "auth_token": "83983a62faebdfc2cabb089cbf81d6da",
-    "from_number": "+447700101592",
-    "to_number": "+447724267222",
+    "account_sid": os.environ["TWILIO_ACCOUNT_SID"],
+    "auth_token": os.environ["TWILIO_AUTH_TOKEN"],
+    "from_number": os.environ["TWILIO_FROM_NUMBER"],
+    "to_number": os.environ["TWILIO_TO_NUMBER"],
 }
 
 # Legacy IMAP config for thesemantics.co accounts
 EMAIL_CONFIG = {
-    "password": "J]r0]a+C.t*g",
-    "imap_server": "thesemantics.co",
+    "password": os.environ["LEGACY_EMAIL_PASSWORD"],
+    "imap_server": os.environ.get("LEGACY_EMAIL_IMAP_SERVER", "thesemantics.co"),
 }
 
 # Gmail config — uses an App Password (not account password)
 GMAIL_CONFIG = {
     "imap_server": "imap.gmail.com",
-    "app_password": "dbfrklagzbdgnsju",  # App password without spaces
+    "app_password": os.environ["GMAIL_APP_PASSWORD"],  # App password without spaces
 }
 
 # Proxy for VFS requests (residential UK proxy)
 PROXY_CONFIG = {
-    "proxy": "user-v12T4mAL03J9HGfz-type-residential-session-av7gkchx-country-gb-rotation-0:Kv72bsFi3VQh7f0N@geo.g-w.info:10080",
+    "proxy": os.environ["VFS_PROXY_URL"],
 }

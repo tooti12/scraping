@@ -2,6 +2,95 @@ const promptContainer = document.getElementById("prompt-container");
 const statusList = document.getElementById("status-list");
 const connDot = document.getElementById("conn-dot");
 const currentStep = document.getElementById("current-step");
+const stepperEl = document.getElementById("stepper");
+
+// ── Phase stepper ───────────────────────────────────────────────────────
+// Macro view of where the booking flow is right now, separate from the
+// current-step pill (which shows the specific sub-event). Built from the
+// same event/prompt vocabulary booking_flow.py and app.js already speak.
+
+const PHASES = [
+  { id: "confirm", label: "Confirm Slot" },
+  { id: "applicant", label: "Applicant Details" },
+  { id: "datetime", label: "Date & Time" },
+  { id: "review", label: "Review" },
+  { id: "payment", label: "Payment" },
+  { id: "done", label: "Done" },
+];
+
+const EVENT_PHASE = {
+  booking_flow_started: "confirm",
+  step_applicant_form: "applicant",
+  applicant_fields_fetched: "applicant",
+  step_otp: "applicant",
+  otp_requested: "applicant",
+  otp_fetch_failed: "applicant",
+  otp_verified: "applicant",
+  otp_verification_failed: "applicant",
+  step_applicant_summary: "applicant",
+  step_book_appointment: "datetime",
+  date_selected: "datetime",
+  time_selected: "datetime",
+  step_review: "review",
+  review_ready: "review",
+  review_cancelled: "datetime",
+  terms_accepted: "review",
+  step_payment_disclaimer: "payment",
+  step_payment: "payment",
+  payment_submitted: "payment",
+  booking_flow_finished: "done",
+};
+
+const PROMPT_PHASE = {
+  confirm_booking: "confirm",
+  enter_applicant_details: "applicant",
+  select_date: "datetime",
+  select_time: "datetime",
+  confirm_review: "review",
+  enter_card_details: "payment",
+};
+
+const CHECK_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 9.5 17 19 7"/></svg>';
+
+function renderStepper() {
+  stepperEl.innerHTML = "";
+  PHASES.forEach((phase, i) => {
+    if (i > 0) {
+      const line = document.createElement("div");
+      line.className = "stepper-line";
+      stepperEl.appendChild(line);
+    }
+    const item = document.createElement("div");
+    item.className = "stepper-item";
+    item.dataset.phase = phase.id;
+
+    const bullet = document.createElement("div");
+    bullet.className = "stepper-bullet";
+    bullet.innerHTML = `<span>${i + 1}</span>${CHECK_ICON}`;
+
+    const label = document.createElement("span");
+    label.className = "stepper-label";
+    label.textContent = phase.label;
+
+    item.appendChild(bullet);
+    item.appendChild(label);
+    stepperEl.appendChild(item);
+  });
+}
+
+function setPhase(phaseId) {
+  if (!phaseId) return;
+  const targetIndex = PHASES.findIndex((p) => p.id === phaseId);
+  if (targetIndex === -1) return;
+  stepperEl.querySelectorAll(".stepper-item").forEach((item, i) => {
+    item.classList.remove("is-current", "is-done");
+    if (i < targetIndex) item.classList.add("is-done");
+    else if (i === targetIndex) item.classList.add("is-current");
+  });
+}
+
+renderStepper();
 
 // Maps the raw event names pushed via FrontendBridge.push_status() to a
 // human-readable label and a severity used for log/badge coloring.
@@ -40,6 +129,7 @@ function setStep(label, level) {
 function logStatus(event) {
   const [label, level] = describeEvent(event.event);
   setStep(label, level);
+  setPhase(EVENT_PHASE[event.event]);
 
   const li = document.createElement("li");
   li.className = "level-" + level;
@@ -377,6 +467,7 @@ function renderPrompt(msg) {
   const renderer = PROMPT_RENDERERS[msg.prompt_type];
   promptContainer.innerHTML = "";
   setStep("Action required", "warning");
+  setPhase(PROMPT_PHASE[msg.prompt_type]);
   if (!renderer) {
     promptContainer.textContent = `Unknown prompt type: ${msg.prompt_type}`;
     return;

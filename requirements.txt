@@ -1,5 +1,6 @@
 seleniumbase==4.38.2
 flask>=3.0.0
+python-dotenv>=1.0.1
 certifi>=2025.4.26
 attrs>=25.3.0
 chardet==5.2.0

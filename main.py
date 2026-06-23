@@ -9,20 +9,25 @@ from typing import Any
 
 from auth_handler import AuthHandler
 from browser_client import BrowserClient
+from config import SHARED_VFS_ACCOUNT
 from dashboard.app import run_dashboard
 from frontend_bridge import FrontendBridge
 from notification_handler import SMSNotifier
 
 # ──────────────────────────────────────────────
-# Countries to scan — same credentials, different VFS destinations.
-# Add or remove entries here to change which countries are monitored.
+# Countries to scan — same credentials (sourced from config.py, which reads
+# them from the environment — see .env / DEPLOYMENT.md), different VFS
+# destinations. Add or remove entries here to change which countries are
+# monitored.
 # ──────────────────────────────────────────────
-ACCOUNTS = [
-    ("dnk", "umar.jwork@gmail.com", "P@ssword123"), #Denmark
-    ("bgr", "umar.jwork@gmail.com", "P@ssword123"), #Bulgaria
-    ("svn", "umar.jwork@gmail.com", "P@ssword123"), #Slovenia
-    ("che", "umar.jwork@gmail.com", "P@ssword123"), #Switzerland
+_VFS_EMAIL = SHARED_VFS_ACCOUNT["email"]
+_VFS_PASSWORD = SHARED_VFS_ACCOUNT["password"]
 
+ACCOUNTS = [
+    ("dnk", _VFS_EMAIL, _VFS_PASSWORD),  # Denmark
+    ("bgr", _VFS_EMAIL, _VFS_PASSWORD),  # Bulgaria
+    ("svn", _VFS_EMAIL, _VFS_PASSWORD),  # Slovenia
+    ("che", _VFS_EMAIL, _VFS_PASSWORD),  # Switzerland
 ]
 
 # How long to wait between countries in the same cycle (seconds)

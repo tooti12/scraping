@@ -16,21 +16,37 @@ from browser_client import BrowserClient
 from config import SHARED_VFS_ACCOUNT
 
 
-def check_country_slot(country: str) -> dict:
+def check_country_slot(country: str, on_status=None) -> dict:
     """Run one slot check for `country`. Always returns a dict
-    with a "status" key: "slots_available" | "no_slots" | "error"."""
+    with a "status" key: "slots_available" | "no_slots" | "error".
+
+    on_status, if given, is called with a short event-name string at each
+    real milestone (connecting, logging in, OTP wait, etc.) — this is what
+    lets dashboard/app.py mirror actual backend progress to the frontend
+    instead of a generic/disconnected loading message."""
+
+    def emit(event):
+        if on_status:
+            try:
+                on_status(event)
+            except Exception:
+                pass
+
     email = SHARED_VFS_ACCOUNT["email"]
     password = SHARED_VFS_ACCOUNT["password"]
 
     try:
+        emit("connecting")
         with BrowserClient(country, proxy=True, headless=False) as browser:
-            auth = AuthHandler(country, email, password, browser)
+            auth = AuthHandler(country, email, password, browser, on_status=emit)
             token = auth.authenticate()
             if token is None:
                 return {"status": "error", "message": "Could not log in to VFS right now."}
 
             browser.sb.sleep(3)
+            emit("checking_centres")
             outcome = browser.check_slot_only()
+            emit("finalizing")
     except Exception as e:
         print(f"[slot_check_service] Check failed for {country}: {e}")
         return {"status": "error", "message": "Something went wrong while checking. Please try again."}

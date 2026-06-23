@@ -3,49 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VFS Slot Checker</title>
+  <title>VFS Slot Checker — Live Appointment Availability</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235b8cff'/%3E%3Cpath d='M7 12.5l3.2 3.2L17 9' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/home.css">
 </head>
 <body>
   <nav class="navbar">
-    <div class="brand">VFS Slot Checker</div>
+    <a class="brand" href="#top">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12.5l3.2 3.2L17 9"/></svg>
+      </span>
+      VFS Slot Checker
+    </a>
     <div class="nav-links">
       <a href="#how-it-works">How it works</a>
       <a href="#features">Features</a>
       <a href="#countries">Countries</a>
+      <a class="nav-cta js-coming-soon" href="/booking">
+        Booking Console
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
     </div>
   </nav>
 
-  <header class="hero">
+  <header class="hero" id="top">
     <div class="hero-copy">
-      <h1>Check VFS visa appointment availability in seconds</h1>
+      <span class="eyebrow"><span class="live-dot"></span> Live checks against VFS Global — no cached data</span>
+      <h1>Check VFS visa appointment <span class="grad">availability in seconds</span></h1>
       <p>
         Stop manually refreshing the VFS website. Pick your destination country and our bot
         checks VFS Global for an open appointment slot right now.
       </p>
-      <a class="hero-cta" href="#countries">Check a country →</a>
-      <p class="scope-note">
-        Currently checking the <strong>London</strong> centre only, <strong>Tourism</strong> category only —
-        more centres and visa categories are coming soon.
-      </p>
+      <a class="hero-cta" href="#countries">
+        Check a country
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+      <div class="scope-badges">
+        <span class="scope-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.2-7-11a7 7 0 1 1 14 0c0 5.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+          <strong>London</strong> centre only
+        </span>
+        <span class="scope-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+          <strong>Tourism</strong> category only
+        </span>
+        <span class="scope-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          <strong>{{ countries|length }}</strong> destinations monitored
+        </span>
+      </div>
     </div>
   </header>
 
   <section class="section" id="how-it-works">
-    <h2 class="section-title">How it works</h2>
+    <div class="section-head">
+      <span class="section-kicker">Process</span>
+      <h2 class="section-title">How it works</h2>
+    </div>
     <div class="steps-grid">
       <div class="step-card">
-        <span class="step-number">1</span>
+        <div class="step-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        </div>
+        <span class="step-number">STEP 1</span>
         <h3>Pick your destination</h3>
         <p class="muted">Choose the country you're applying to from the list below.</p>
       </div>
       <div class="step-card">
-        <span class="step-number">2</span>
+        <div class="step-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h.01M15 9h.01M9 15c.7.8 1.8 1.3 3 1.3s2.3-.5 3-1.3"/></svg>
+        </div>
+        <span class="step-number">STEP 2</span>
         <h3>We check VFS for you</h3>
         <p class="muted">Our bot logs in to VFS Global and checks live appointment availability.</p>
       </div>
       <div class="step-card">
-        <span class="step-number">3</span>
+        <div class="step-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/></svg>
+        </div>
+        <span class="step-number">STEP 3</span>
         <h3>Get an instant result</h3>
         <p class="muted">See immediately whether a slot is open, and which centre and category it's under.</p>
       </div>
@@ -53,17 +92,29 @@
   </section>
 
   <section class="section section-alt" id="features">
-    <h2 class="section-title">Why use this</h2>
+    <div class="section-head">
+      <span class="section-kicker">Why this</span>
+      <h2 class="section-title">Built to skip the refresh grind</h2>
+    </div>
     <div class="features-grid">
       <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+        </div>
         <h3>Real-time checks</h3>
         <p class="muted">Every click runs a live check against VFS Global — never cached or stale data.</p>
       </div>
       <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7M21 12a9 9 0 0 1-15 6.7"/><path d="M3 3v6h6M21 21v-6h-6"/><line x1="3" y1="21" x2="21" y2="3"/></svg>
+        </div>
         <h3>No manual refreshing</h3>
         <p class="muted">Skip the constant refresh-and-hope routine that VFS slot hunting usually demands.</p>
       </div>
       <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5l-8-3z"/><path d="m9 12 2 2 4-4"/></svg>
+        </div>
         <h3>Automated &amp; accurate</h3>
         <p class="muted">The same automation that powers our booking pipeline, just for checking availability.</p>
       </div>
@@ -71,13 +122,29 @@
   </section>
 
   <main class="section" id="countries">
-    <h2 class="section-title">Select a country</h2>
+    <div class="section-head">
+      <span class="section-kicker">Destinations</span>
+      <h2 class="section-title">Select a country</h2>
+    </div>
+    {% set flag_svgs = {
+      "dnk": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#c8102e"/><rect x="10" width="4" height="20" fill="#fff"/><rect y="8" width="30" height="4" fill="#fff"/></svg>',
+      "bgr": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#00966e"/><rect y="13.33" width="30" height="6.67" fill="#d62612"/></svg>',
+      "svn": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#005ce6"/><rect y="13.33" width="30" height="6.67" fill="#d52b1e"/><g transform="translate(4,3)"><path d="M0 6.5 L4 1 L8 6.5 Z" fill="#005ce6" stroke="#fff" stroke-width="0.4"/><circle cx="2" cy="1" r="0.7" fill="#ffd700"/><circle cx="4.5" cy="-0.3" r="0.7" fill="#ffd700"/><circle cx="6.4" cy="1.4" r="0.7" fill="#ffd700"/></g></svg>',
+      "che": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#d52b1e"/><rect x="13" y="4" width="4" height="12" fill="#fff"/><rect x="7" y="8" width="16" height="4" fill="#fff"/></svg>',
+    } %}
+    {% set default_flag = '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#232838"/><circle cx="15" cy="10" r="6" fill="none" stroke="#5b6376" stroke-width="1"/></svg>' %}
     <div class="country-grid">
       {% for c in countries %}
       <button class="country-card" data-country="{{ c.code }}" data-name="{{ c.name }}">
-        <span class="country-code">{{ c.code|upper }}</span>
+        <div class="country-head">
+          <span class="country-flag">{{ flag_svgs.get(c.code, default_flag)|safe }}</span>
+          <span class="country-code">{{ c.code|upper }}</span>
+        </div>
         <span class="country-name">{{ c.name }}</span>
-        <span class="country-cta">Check availability →</span>
+        <span class="country-cta">
+          Check availability
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
       </button>
       {% endfor %}
     </div>
@@ -85,7 +152,10 @@
 
   <footer class="footer">
     <span>VFS Slot Checker — not affiliated with VFS Global.</span>
-    <a href="/booking">Booking Console</a>
+    <a class="footer-link js-coming-soon" href="/booking">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M9 21h6"/></svg>
+      Booking Console
+    </a>
   </footer>
 
   <div class="result-overlay" id="result-overlay" hidden>
