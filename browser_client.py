@@ -414,12 +414,50 @@ class BrowserClient:
             # Banner may already be dismissed or may not appear — safe to continue.
             print("[BrowserClient] No cookie banner found, continuing.")
 
-    def solve_captcha(self):
+    def _cloudflare_dialog_present(self, timeout: float = 2) -> bool:
         try:
-            self.sb.uc_gui_click_captcha()
-            self.sb.uc_click('button:contains("Submit")')
+            self.sb.wait_for_element("app-cloudflare-dialog", timeout=timeout)
+            return True
         except Exception:
-            print("[BrowserClient] Could not solve captcha (may not be present).")
+            return False
+
+    def solve_captcha(self, max_attempts: int = 3) -> bool:
+        """
+        Click through the login-flow Cloudflare captcha if one is actually
+        showing, verifying the dialog is gone afterward instead of trusting
+        whether uc_gui_click_captcha() raised. That click (and the
+        click-Submit that used to follow it unconditionally) routinely
+        raises even when the captcha is solved — e.g. Cloudflare's
+        Turnstile often self-submits with no separate Submit button to
+        click, so the old code's blind `except Exception: print("Could not
+        solve captcha")` was a false negative almost every time the
+        dialog auto-passed on the real screen. Retries up to max_attempts
+        only while the dialog is still genuinely present; returns whether
+        it ended up gone.
+        """
+        if not self._cloudflare_dialog_present():
+            print("[BrowserClient] No captcha modal present — nothing to solve.")
+            return True
+
+        for attempt in range(1, max_attempts + 1):
+            print(f"[BrowserClient] Captcha modal present — solving (attempt {attempt}/{max_attempts})...")
+            try:
+                self.sb.uc_gui_click_captcha()
+            except Exception as e:
+                print(f"[BrowserClient]   click raised {type(e).__name__}: {e} — checking dialog state anyway.")
+            # Not every captcha flow has a separate Submit button (Turnstile
+            # often self-submits) — try it, but its absence isn't a failure.
+            try:
+                self.sb.uc_click('button:contains("Submit")', timeout=3)
+            except Exception:
+                pass
+            self.sb.sleep(2)
+            if not self._cloudflare_dialog_present():
+                print(f"[BrowserClient] Captcha solved (confirmed gone after attempt {attempt}).")
+                return True
+
+        print(f"[BrowserClient] Captcha modal still present after {max_attempts} attempts — giving up.")
+        return False
 
     def check_is_ip_blocked(self):
         try:
@@ -435,7 +473,20 @@ class BrowserClient:
             return True
         except Exception as e:
             print("[BrowserClient] No IP block via heading:", e)
-            return False
+
+        # Some block variants land on .../page-not-found with the message
+        # only in <title>, no visible h1 at all (seen for real: Denmark's
+        # session landed here after submitting credentials and the heading
+        # check above missed it, so the run just timed out 50s later
+        # waiting for an OTP field that was never going to appear).
+        try:
+            title = self.sb.get_title()
+            if "unable to progress" in title.lower():
+                print(f"[BrowserClient] IP block detected via page title: {title!r}")
+                return True
+        except Exception as e:
+            print("[BrowserClient] No IP block via title:", e)
+        return False
 
     def get_auth_token(self):
         return self.sb.execute_script("return sessionStorage.getItem('JWT');")

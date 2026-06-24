@@ -24,6 +24,12 @@ class AuthHandler:
         # attributed to the wrong session. None for every other caller,
         # which only ever runs one session at a time anyway.
         self.login_lock = login_lock
+        # Set when authenticate() returns None specifically because VFS's
+        # own block page/message was detected, as opposed to some other
+        # failure (timeout, missing element, etc.) — slot_check_service.py
+        # reads this to tell slot_status_cache.py whether to apply a long
+        # cooldown for this country instead of just retrying next cycle.
+        self.blocked = False
 
     def _emit(self, event):
         if self.on_status:
@@ -41,6 +47,7 @@ class AuthHandler:
         if self.browser.check_is_ip_blocked():
             print("[AuthHandler] IP is blocked — aborting authentication.")
             self.browser._log_state("Authentication aborted — IP blocked")
+            self.blocked = True
             return None
 
         print("[AuthHandler] IP not blocked. Handling cookie banner...")
@@ -64,6 +71,7 @@ class AuthHandler:
             if self.browser.check_is_ip_blocked():
                 print("[AuthHandler] IP blocked after credential entry — aborting.")
                 self.browser._log_state("Authentication aborted — IP blocked after credentials")
+                self.blocked = True
                 return None
 
             print("[AuthHandler] No IP block. Waiting for OTP prompt and fetching OTP from email...")
@@ -101,7 +109,7 @@ class AuthHandler:
             self.browser.sb.type('input[name="email"]', self.email)
             self.browser.sb.type('input[name="password"]', self.password)
         print("[AuthHandler] Waiting for login button...")
-        self.browser.sb.wait_for_element("button.mat-btn-lg", timeout=50)
+        self.browser.sb.wait_for_element("button.mat-btn-lg", timeout=80)
 
     def _submit_login(self):
         # Solves the pre-login Cloudflare captcha (a real OS-level click —
@@ -127,7 +135,14 @@ class AuthHandler:
         pass
 
     def _submit_otp(self, email):
-        if "@gmail.com" in email.lower():
+        # Captured before waiting for the email so GmailOTPClient can reject
+        # any inbox match older than this — otherwise, on a slow/garbled OTP
+        # email, it can silently fall back to a *stale* OTP from an earlier
+        # login attempt, which VFS rejects in a way that looks just like a
+        # block in the logs (see GmailOTPClient.get_otp's docstring).
+        requested_at = time.time()
+        is_gmail = "@gmail.com" in email.lower()
+        if is_gmail:
             from notification_handler import GmailOTPClient
             otp_client = GmailOTPClient()
             print(f"[AuthHandler] Using GmailOTPClient for {email}")
@@ -137,13 +152,13 @@ class AuthHandler:
             print(f"[AuthHandler] Using legacy EmailClient for {email}")
 
         print("[AuthHandler] Waiting for OTP input field to appear (#mat-input-3)...")
-        self.browser.sb.wait_for_element("#mat-input-3", timeout=50)
+        self.browser.sb.wait_for_element("#mat-input-3", timeout=80)
         print("[AuthHandler] OTP field found. Sleeping 20s to let email arrive...")
         self._emit("awaiting_otp")
         self.browser.sb.sleep(20)
 
         print("[AuthHandler] Fetching OTP from email inbox...")
-        otp = otp_client.get_otp(email)
+        otp = otp_client.get_otp(email, since=requested_at) if is_gmail else otp_client.get_otp(email)
 
         if otp is None:
             print("[AuthHandler] Failed to retrieve OTP — cannot complete login.")

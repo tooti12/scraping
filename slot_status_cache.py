@@ -2,9 +2,34 @@
 """Continuous background loop backing the public slot-checker's
 availability page (dashboard/templates/availability.html).
 
-Every cycle, countries in config.COUNTRIES are checked concurrently, each in
-its own OS process (multiprocessing, not threading) — this is the piece
-that matters:
+Each country in config.COUNTRIES gets one long-lived OS process (a
+"worker", spawned by _ensure_worker() and run by
+slot_check_service.run_country_worker) that logs in to VFS *once* and then
+answers repeated "check" commands on that same authenticated session,
+instead of logging in fresh for every single check:
+
+- VFS's own block message ("too many login attempts... try again in one
+  hour") is triggered by login frequency, not check frequency — the old
+  design opened a brand new browser and did a full login + OTP wait on
+  every cycle, for every country, on one shared account. That's exactly
+  the pattern VFS's anti-bot logic is watching for. Reusing one session
+  across many cycles (re-authenticating only when VFS's own
+  SESSION_EXPIRED signal says to — see BrowserClient._navigate_to_booking_
+  form and slot_check_service.run_country_worker) cuts login frequency by
+  roughly the same factor as the cycle count, while still checking just as
+  often.
+- It also means each country sits on an authenticated, ready
+  /application-detail session for as long as it runs, instead of nothing
+  existing between checks — useful groundwork for a future "click a slot,
+  go straight to booking" flow that wants to hand off a live session
+  rather than open a second browser from scratch.
+- Trade-off: every country's Chrome instance now stays open continuously
+  (idle between checks) rather than only existing for the few seconds it's
+  actively checking, so idle memory/CPU usage is higher than the old
+  spawn-fresh-every-cycle design. Worth it for the login-frequency fix.
+
+Workers run as separate OS processes (multiprocessing, not threading) for
+the same reasons as before:
 
 - Selenium + pyautogui's screen-driven Cloudflare solving is heavy, mostly
   synchronous work. Running several of those as Python *threads* in the
@@ -28,9 +53,11 @@ every Chrome window would share the one real desktop. In practice this
 caused undetected-chromedriver's window-focus/reconnect logic to get
 confused with multiple simultaneous UC sessions on one screen — observed as
 random "NoSuchWindowException: Active window was already closed" crashes.
-MAX_CONCURRENT_COUNTRIES below caps concurrency to 1 on any non-Linux box
-(plain sequential, same as the original design) and only parallelizes
-where Xvfb actually isolates each session.
+MAX_CONCURRENT_COUNTRIES below caps how many workers are actively
+*checking* at once to 1 on any non-Linux box (plain sequential, same as the
+original design) and only parallelizes where Xvfb actually isolates each
+session — every worker still exists as its own idle process the rest of the
+time, just not actively driving its browser unless commanded to check.
 
 The one thing that can't run fully in parallel even on Linux is login:
 every country shares one Gmail inbox for OTPs, so the window from "click
@@ -43,24 +70,47 @@ The loop doesn't start on its own — it only begins once a visitor clicks
 "Start Bot" on /availability (see start()/is_running() and
 dashboard/app.py's /api/start-bot), and runs until a visitor explicitly
 stops it (stop()/dashboard/app.py's /api/stop-bot) or the process exits.
-Every page load and /api/status poll just reads the resulting cache, and
-visitor traffic can never block or be blocked by it. See DEPLOYMENT.md.
+stop() tears down every worker (closing its Chrome session) rather than
+leaving them running idle, so a later start() always begins from a clean
+slate. Every page load and /api/status poll just reads the resulting
+cache, and visitor traffic can never block or be blocked by it. See
+DEPLOYMENT.md.
 """
 import multiprocessing as mp
+import random
 import sys
 import threading
 import time
 from datetime import datetime, timezone
 
 from config import COUNTRIES
-from slot_check_service import check_country_slot
+from slot_check_service import run_country_worker
 
-# One full pass over all countries, then wait this long before the next pass.
-REFRESH_INTERVAL_SECONDS = 60
+# One full pass over all countries, then wait a random amount of time in
+# this range before the next pass. A range instead of one fixed number so
+# the loop's timing doesn't look as mechanically regular to VFS — same
+# reasoning as COUNTRY_BREAK_SECONDS_MIN/MAX below. Widened to 3-5 minutes
+# (was 45-90s): checking persists a logged-in session now rather than
+# re-authenticating every cycle, so login frequency (what VFS's own block
+# message specifically calls out) no longer scales with this — but each
+# check is still a real, visible interaction with VFS's app, and a slot
+# opening up isn't materially less useful to know about 4 minutes later
+# than 1 minute later on a dashboard that's informational, not
+# auto-booking. Cuts total request volume ~3-4x for negligible real loss.
+REFRESH_INTERVAL_SECONDS_MIN = 180
+REFRESH_INTERVAL_SECONDS_MAX = 300
 
-# Pause this long after one country's check finishes before starting the
-# next one, so checks don't slam VFS back-to-back.
-COUNTRY_BREAK_SECONDS = 35
+# Pause a random amount of time in this range after one country's check
+# finishes before commanding the next one, so checks don't slam VFS
+# back-to-back at an exact, easily-fingerprinted interval.
+COUNTRY_BREAK_SECONDS_MIN = 30
+COUNTRY_BREAK_SECONDS_MAX = 50
+
+# How long to stop retrying a country after it hits VFS's own block page
+# (see browser_client.check_is_ip_blocked() / auth_handler.AuthHandler.blocked).
+# VFS's own block message says "try again in one hour" — padded a bit since
+# retrying right at the hour mark risks immediately re-triggering it.
+BLOCK_COOLDOWN_SECONDS = 90 * 60
 
 # See module docstring — full parallelism is only safe where every Chrome
 # session gets its own real (virtual) display.
@@ -70,21 +120,38 @@ MAX_CONCURRENT_COUNTRIES = len(COUNTRIES) if sys.platform.startswith("linux") el
 # Selenium call has no timeout of its own. Without this, one stuck country
 # would freeze the whole loop and every other country's cached status would
 # go stale forever instead of just that one country reporting an error. This
-# bounds how long a single country's *process* runs before its own internal
-# watchdog (in _check_one) force-quits its browser and lets it exit. Sized
+# bounds how long a single "check" command may run before slot_check_service
+# itself force-quits that country's wedged browser (see
+# slot_check_service._run_with_watchdog) and reports a timeout — the worker
+# process survives this and rebuilds a fresh browser next check. Sized
 # generously because check_slot_only() may now submit several sub-category
 # combinations (one captcha-solve + banner-wait each) for missions that
 # don't offer Tourism, not just one.
 CHECK_TIMEOUT_SECONDS = 900
 
-# Extra time the parent process gives a country's process to actually exit
-# after CHECK_TIMEOUT_SECONDS, before concluding the process itself (not
-# just the browser) is stuck and killing it outright. Covers the rare case
-# where even browser.sb.driver.quit() hangs.
+# Extra time the main loop gives a worker to actually respond after
+# CHECK_TIMEOUT_SECONDS before concluding the *process* itself (not just its
+# browser) is stuck and killing it outright. Covers the rare case where even
+# browser.sb.driver.quit() hangs. A replacement worker is spawned right
+# after, so this only costs one cycle's check for that country.
 PROCESS_JOIN_GRACE_SECONDS = 60
 
 _lock = threading.Lock()
 _status: dict = {}
+# country code -> epoch seconds until which _run_one_cycle() won't retry it.
+# country code -> {"process": mp.Process, "command_queue": mp.Queue}, one
+# entry per country's long-lived worker (see module docstring). Both dicts
+# below are only ever touched from the main process's loop thread
+# (_run_loop / _run_one_cycle) *or* from stop(), which runs on whichever
+# Flask request thread handles /api/stop-bot — _workers_lock guards against
+# those two racing on the same dict.
+_blocked_until: dict = {}
+_workers: dict = {}
+_workers_lock = threading.Lock()
+# Shared across every worker for the lifetime of one start()/stop() cycle —
+# see module docstring on why login itself stays serialized across countries.
+_login_lock = None
+_result_queue = None
 
 
 def get_all_status() -> dict:
@@ -93,108 +160,128 @@ def get_all_status() -> dict:
         return {code: dict(data) for code, data in _status.items()}
 
 
-def _check_one(code: str, login_lock) -> dict:
-    """Runs the actual check in an inner thread so this can give up after
-    CHECK_TIMEOUT_SECONDS and force-quit the browser rather than block
-    forever — Python can't force-kill a thread, but force-quitting the
-    browser unblocks whatever Selenium call is stuck, so the abandoned
-    thread exits shortly after anyway. Process-agnostic: this runs inside
-    whichever OS process calls it (see _process_entry)."""
-    browser_holder = {}
-    holder = {}
-    done = threading.Event()
-
-    def on_browser(browser):
-        browser_holder["browser"] = browser
-
-    def run():
-        try:
-            holder["result"] = check_country_slot(code, on_browser=on_browser, login_lock=login_lock)
-        except Exception:
-            holder["result"] = {"status": "error", "message": "Something went wrong while checking."}
-        done.set()
-
-    threading.Thread(target=run, daemon=True).start()
-    finished = done.wait(timeout=CHECK_TIMEOUT_SECONDS)
-
-    if not finished:
-        browser = browser_holder.get("browser")
-        if browser is not None:
-            try:
-                browser.sb.driver.quit()
-            except Exception:
-                pass
-        return {"status": "error", "message": "Check timed out (possibly a captcha that couldn't be solved)."}
-
-    return holder.get("result", {"status": "error", "message": "Something went wrong while checking."})
+def _spawn_worker(code: str) -> None:
+    command_queue = mp.Queue()
+    p = mp.Process(
+        target=run_country_worker,
+        args=(code, command_queue, _result_queue, _login_lock, CHECK_TIMEOUT_SECONDS),
+        daemon=True,
+    )
+    p.start()
+    with _workers_lock:
+        _workers[code] = {"process": p, "command_queue": command_queue}
 
 
-def _process_entry(code: str, login_lock, result_queue) -> None:
-    """Entry point for one country's dedicated OS process."""
+def _ensure_worker(code: str) -> None:
+    with _workers_lock:
+        w = _workers.get(code)
+        alive = w is not None and w["process"].is_alive()
+    if not alive:
+        _spawn_worker(code)
+
+
+def _kill_worker(code: str) -> None:
+    """For a worker that's stopped responding — no point asking it nicely."""
+    with _workers_lock:
+        w = _workers.pop(code, None)
+    if w is None:
+        return
     try:
-        result = _check_one(code, login_lock)
+        w["process"].terminate()
+        w["process"].join(timeout=5)
     except Exception:
-        result = {"status": "error", "message": "Something went wrong while checking."}
-    result_queue.put((code, result))
+        pass
+
+
+def _stop_all_workers() -> None:
+    """Asks every worker to stop (closing its Chrome session) and waits for
+    them in parallel rather than one at a time, so this takes roughly as
+    long as the single slowest shutdown, not the sum of all of them."""
+    with _workers_lock:
+        workers = list(_workers.items())
+        _workers.clear()
+    for _, w in workers:
+        try:
+            w["command_queue"].put("stop")
+        except Exception:
+            pass
+    for _, w in workers:
+        try:
+            w["process"].join(timeout=5)
+            if w["process"].is_alive():
+                w["process"].terminate()
+        except Exception:
+            pass
 
 
 def _run_one_cycle() -> None:
-    login_lock = mp.Lock()
-    result_queue = mp.Queue()
-    pending = [c["code"] for c in COUNTRIES]
-    processes: dict = {}
-    started_at: dict = {}
+    now = time.time()
+    on_cooldown = [c["code"] for c in COUNTRIES if _blocked_until.get(c["code"], 0) > now]
+    pending = [c["code"] for c in COUNTRIES if c["code"] not in on_cooldown]
 
-    def spawn_next():
+    # Don't even command a check for a country still cooling down from a
+    # detected VFS block — just refresh its cached message so the
+    # availability page explains the pause instead of looking stuck on a
+    # stale error. Real retry happens once BLOCK_COOLDOWN_SECONDS elapses.
+    for code in on_cooldown:
+        remaining_min = max(1, round((_blocked_until[code] - now) / 60))
+        with _lock:
+            _status[code] = {
+                "status": "error",
+                "message": f"Paused after a VFS block — retrying in ~{remaining_min} min.",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    busy: dict = {}  # country code -> time.monotonic() when "check" was sent
+
+    def command_next():
         if not pending or _stop_event.is_set():
             return
         code = pending.pop(0)
-        p = mp.Process(target=_process_entry, args=(code, login_lock, result_queue), daemon=True)
-        p.start()
-        processes[code] = p
-        started_at[code] = time.monotonic()
+        _ensure_worker(code)
+        with _workers_lock:
+            _workers[code]["command_queue"].put("check")
+        busy[code] = time.monotonic()
 
     for _ in range(min(MAX_CONCURRENT_COUNTRIES, len(pending))):
-        spawn_next()
+        command_next()
 
-    while processes or (pending and not _stop_event.is_set()):
+    while busy or (pending and not _stop_event.is_set()):
         try:
-            code, result = result_queue.get(timeout=1)
+            code, result = _result_queue.get(timeout=1)
         except Exception:
             code = None
 
-        if code is not None:
+        # Guards against a stale result from a worker we already gave up on
+        # (killed as "stuck" below) arriving late and getting misattributed.
+        if code is not None and code in busy:
+            if result.get("blocked"):
+                _blocked_until[code] = time.time() + BLOCK_COOLDOWN_SECONDS
             with _lock:
                 _status[code] = {**result, "checked_at": datetime.now(timezone.utc).isoformat()}
-            processes.pop(code, None)
-            started_at.pop(code, None)
+            busy.pop(code, None)
             # A stop request stops new countries from starting, but never
             # force-quits a check already in flight — those finish (or hit
             # their own CHECK_TIMEOUT_SECONDS watchdog) naturally.
             if pending and not _stop_event.is_set():
-                _stop_event.wait(timeout=COUNTRY_BREAK_SECONDS)
-            spawn_next()
+                _stop_event.wait(timeout=random.uniform(COUNTRY_BREAK_SECONDS_MIN, COUNTRY_BREAK_SECONDS_MAX))
+            command_next()
 
-        # Any process that's blown past its own in-process watchdog plus
+        # Any worker that's blown past its own in-process watchdog plus
         # grace is stuck at the process level, not just the browser. Kill
-        # it outright so it can't block this cycle (or pile up) forever,
-        # and free its slot for the next pending country.
-        now = time.monotonic()
-        for stuck_code in [c for c in processes if now - started_at[c] > CHECK_TIMEOUT_SECONDS + PROCESS_JOIN_GRACE_SECONDS]:
-            try:
-                processes[stuck_code].terminate()
-                processes[stuck_code].join(timeout=5)
-            except Exception:
-                pass
+        # it outright so it can't block this cycle (or pile up) forever; a
+        # fresh replacement worker is spawned to take over for next time.
+        now_m = time.monotonic()
+        for stuck_code in [c for c in busy if now_m - busy[c] > CHECK_TIMEOUT_SECONDS + PROCESS_JOIN_GRACE_SECONDS]:
+            _kill_worker(stuck_code)
             with _lock:
                 _status[stuck_code] = {
                     "status": "error",
                     "message": "Check process became unresponsive and was stopped.",
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                 }
-            processes.pop(stuck_code, None)
-            started_at.pop(stuck_code, None)
-            spawn_next()
+            busy.pop(stuck_code, None)
+            command_next()
 
 
 def _run_loop():
@@ -210,10 +297,16 @@ def _run_loop():
             # Stopped mid-cycle — not every country actually got checked,
             # so this pass doesn't count toward first_cycle_done.
             break
+        # Computed once and reused for both the actual wait and the
+        # frontend-facing countdown, so "Bot will start in Ns" always
+        # matches when the next cycle really starts instead of drifting
+        # against a fixed number while the real wait varies.
+        wait_seconds = random.uniform(REFRESH_INTERVAL_SECONDS_MIN, REFRESH_INTERVAL_SECONDS_MAX)
         with _started_lock:
             _first_cycle_done = True
-            _next_cycle_at = time.time() + REFRESH_INTERVAL_SECONDS
-        _stop_event.wait(timeout=REFRESH_INTERVAL_SECONDS)
+            _next_cycle_at = time.time() + wait_seconds
+        _stop_event.wait(timeout=wait_seconds)
+    _stop_all_workers()
     with _started_lock:
         _started = False
         _is_checking = False
@@ -226,6 +319,12 @@ _is_checking = False
 _next_cycle_at: float | None = None
 _started_lock = threading.Lock()
 _stop_event = threading.Event()
+# Tracked so start() can refuse to begin a second generation on top of one
+# that's still tearing down its workers (e.g. a quick stop-then-start
+# click before in-flight checks finished) — two _run_loop generations
+# mutating the shared _workers/_login_lock/_result_queue at once would
+# corrupt that state.
+_loop_thread: threading.Thread | None = None
 
 
 def is_running() -> bool:
@@ -262,27 +361,35 @@ def start() -> bool:
     explicitly clicks "Start Bot" on /availability (dashboard/app.py's
     /api/start-bot). Safe to call more than once (e.g. every click, or from
     more than one browser tab) — only the first call actually starts
-    anything. Returns True if this call is the one that started it."""
-    global _started, _first_cycle_done, _is_checking, _next_cycle_at
+    anything. Returns True if this call is the one that started it; also
+    False (refused, not just "already running") if a previous stop() is
+    still tearing down its workers — see _loop_thread's comment."""
+    global _started, _first_cycle_done, _is_checking, _next_cycle_at, _login_lock, _result_queue, _loop_thread
     with _started_lock:
         if _started:
+            return False
+        if _loop_thread is not None and _loop_thread.is_alive():
             return False
         _started = True
         _is_checking = False
         _next_cycle_at = None
         _first_cycle_done = False
         _stop_event.clear()
-        threading.Thread(target=_run_loop, daemon=True).start()
+        _login_lock = mp.Lock()
+        _result_queue = mp.Queue()
+        _loop_thread = threading.Thread(target=_run_loop, daemon=True)
+        _loop_thread.start()
         return True
 
 
 def stop() -> None:
     """Signals the background loop to stop: no new country checks get
-    started, but whatever's already running in-flight is left to finish on
-    its own rather than force-quit mid-check. is_running() flips to False
-    immediately so the frontend can offer "Start Bot" again right away;
-    a fresh start() after that begins a brand new cycle from scratch. Safe
-    to call even when nothing is running."""
+    commanded, but whatever's already running in-flight is left to finish
+    on its own rather than force-quit mid-check. is_running() flips to
+    False immediately so the frontend can offer "Start Bot" again right
+    away; the loop thread then tears down every worker (closing its Chrome
+    session) in the background. A fresh start() after that spawns brand
+    new workers from scratch. Safe to call even when nothing is running."""
     global _started
     _stop_event.set()
     with _started_lock:

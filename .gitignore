@@ -13,4 +13,6 @@ scraping.ipynb
 .claude/
 browser_sessions/
 logs/
-DEPLOYMENT.md
+*.md
+!README.md
+*.png

@@ -72,7 +72,9 @@ def create_app(bridge):
     @app.route("/api/start-bot", methods=["POST"])
     def api_start_bot():
         slot_status_cache.start()
-        return jsonify({"running": True})
+        # Not hardcoded True: start() can refuse (e.g. a previous stop() is
+        # still tearing down its workers), so report what's actually running.
+        return jsonify({"running": slot_status_cache.is_running()})
 
     @app.route("/api/stop-bot", methods=["POST"])
     def api_stop_bot():
