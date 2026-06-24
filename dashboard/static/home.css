@@ -258,6 +258,33 @@ a {
   transform: none;
 }
 
+/* Between cycles — distinct from the green "actively checking" pill so the
+   two states read differently at a glance, not just by their text. */
+.hero-cta--resting {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: none;
+  cursor: default;
+}
+
+.hero-cta--resting:hover {
+  background: var(--accent-soft);
+  transform: none;
+}
+
+.bot-resting {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.bot-resting-timer {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .hero-cta svg {
   width: 16px;
   height: 16px;
@@ -323,7 +350,7 @@ a {
 
 .section-head {
   text-align: center;
-  margin: 0 0 2.5rem;
+  margin-bottom: 2.5rem;
 }
 
 .section-kicker {
@@ -457,7 +484,7 @@ a {
   margin: 0;
 }
 
-/* ── Country grid ──────────────────────────────────────── */
+/* ── Country grid (availability page) ─────────────────── */
 
 .country-grid {
   display: grid;
@@ -469,6 +496,55 @@ a {
   display: flex;
   justify-content: center;
   margin-top: 2.5rem;
+}
+
+/* ── Country slider (homepage) ────────────────────────────
+   Continuous back-and-forth slide over a single, non-duplicated copy of
+   the country list (see home.html) — a one-direction loop only looks
+   seamless if it can hide a duplicated copy off-screen, which a short list
+   like this can't. `container-type: inline-size` lets the keyframe below
+   express its end position as "track width minus slider width" using
+   `cqw` (the slider's own measured width), so the strip always slides
+   exactly until the last chip's edge meets the slider's edge, then
+   reverses — regardless of how many countries there are. Narrower than
+   the section itself so there's actually room to slide. */
+
+.countries-slider {
+  container-type: inline-size;
+  overflow: hidden;
+  max-width: min(640px, 100%);
+  margin: 0 auto;
+  padding: 0.5rem 0;
+  mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+}
+
+.countries-track {
+  display: flex;
+  width: max-content;
+  gap: 2.5rem;
+  animation: countries-slide 9s ease-in-out infinite alternate;
+}
+
+.countries-slider:hover .countries-track {
+  animation-play-state: paused;
+}
+
+@keyframes countries-slide {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-100% + 100cqw)); }
+}
+
+.country-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.country-chip-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .country-card {
@@ -556,6 +632,21 @@ a {
   margin: 0;
   font-size: 0.74rem;
   color: var(--faint);
+}
+
+/* One line per sub-category checked (e.g. "Long Stay: No slots" then
+   "Short Stay: Slot available") — see availability.html / availability.js
+   renderCountryStatus, which both build these from the same "combos" list. */
+.combo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.combo-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* ── Footer ────────────────────────────────────────────── */
@@ -646,6 +737,109 @@ a {
 
 .modal-close:hover {
   color: var(--text);
+}
+
+/* Loading state */
+
+.result-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  text-align: center;
+  padding: 0.6rem 0 0.2rem;
+}
+
+.result-loading p {
+  margin: 0;
+}
+
+.result-loading .loading-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+/* Double-disc 3D spinner, recolored to the site's accent palette instead
+   of the white/orange defaults. Sits directly on the dim backdrop
+   (#result-box has no .boxed card during loading). */
+.loader {
+  position: relative;
+  transform: rotateZ(45deg);
+  perspective: 1000px;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  color: var(--accent);
+}
+
+.loader:before,
+.loader:after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: inherit;
+  height: inherit;
+  border-radius: 50%;
+  transform: rotateX(70deg);
+  animation: 1s loader-spin linear infinite;
+}
+
+.loader:after {
+  color: var(--accent-strong);
+  transform: rotateY(70deg);
+  animation-delay: 0.4s;
+}
+
+@keyframes loader-spin {
+  0%, 100% { box-shadow: 0.2em 0px 0 0px currentcolor; }
+  12% { box-shadow: 0.2em 0.2em 0 0 currentcolor; }
+  25% { box-shadow: 0 0.2em 0 0px currentcolor; }
+  37% { box-shadow: -0.2em 0.2em 0 0 currentcolor; }
+  50% { box-shadow: -0.2em 0 0 0 currentcolor; }
+  62% { box-shadow: -0.2em -0.2em 0 0 currentcolor; }
+  75% { box-shadow: 0px -0.2em 0 0 currentcolor; }
+  87% { box-shadow: 0.2em -0.2em 0 0 currentcolor; }
+}
+
+.loading-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+  min-height: 1.2em;
+}
+
+.loading-hint {
+  color: var(--faint);
+  font-size: 0.74rem;
+}
+
+/* Always-visible stop control next to the spinner — clicking anywhere
+   else on the overlay does nothing while this loader is showing, only
+   this button stops the bot. */
+.loader-stop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.loader-stop:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.loader-stop svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* Result state */

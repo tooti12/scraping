@@ -1,4 +1,4 @@
-// Shared by home.html and availability.html — gates the Booking Console
+// Shared by home.html and availability.html, gates the Booking Console
 // link behind a "coming soon" modal until it has an auth layer in front
 // of it (see dashboard/app.py's docstring on why /booking can't go public
 // yet).
@@ -17,6 +17,10 @@ function closeOverlay() {
 }
 
 function showComingSoon() {
+  // availability.js sets this while its "checking all countries" loader is
+  // up, since that loader must not be dismissed (or replaced) by anything
+  // other than its own stop button.
+  if (overlay.dataset.lock === "true") return;
   overlay.hidden = false;
   resultBox.innerHTML = "";
   resultBox.classList.add("boxed");
@@ -34,7 +38,7 @@ function showComingSoon() {
   icon.className = "result-icon";
   icon.innerHTML = ICONS.empty;
   heading.appendChild(icon);
-  heading.appendChild(document.createTextNode("Booking Console — coming soon"));
+  heading.appendChild(document.createTextNode("Booking Console: coming soon"));
   resultBox.appendChild(heading);
 
   const p = document.createElement("p");
@@ -52,7 +56,7 @@ function showComingSoon() {
 }
 
 overlay.addEventListener("click", (e) => {
-  if (e.target === overlay) closeOverlay();
+  if (e.target === overlay && overlay.dataset.lock !== "true") closeOverlay();
 });
 
 document.querySelectorAll(".js-coming-soon").forEach((link) => {

@@ -8,11 +8,11 @@
                     for every country, kept fresh by slot_status_cache.py's
                     background loop — but that loop doesn't run on its own;
                     it only starts once a visitor clicks "Start Bot" here
-                    (/api/start-bot). Before that, and on every other
-                    request once it's running, visitors only ever read the
-                    cache — no request triggers a live Selenium run, so
-                    there's no risk of two visitors' checks ever running
-                    Chrome at the same time.
+                    (/api/start-bot) and runs until stopped (/api/stop-bot).
+                    Before that, and on every other request once it's
+                    running, visitors only ever read the cache — no request
+                    triggers a live Selenium run, so there's no risk of two
+                    visitors' checks ever running Chrome at the same time.
 - "/booking"      — the existing internal booking console (booking.html).
                     Talks to the booking automation exclusively through a
                     FrontendBridge instance — never touches Selenium/VFS
@@ -59,12 +59,25 @@ def create_app(bridge):
 
     @app.route("/api/bot-status")
     def api_bot_status():
-        return jsonify({"running": slot_status_cache.is_running()})
+        cycle = slot_status_cache.get_cycle_state()
+        return jsonify(
+            {
+                "running": slot_status_cache.is_running(),
+                "first_cycle_done": slot_status_cache.first_cycle_done(),
+                "checking": cycle["checking"],
+                "next_check_in_seconds": cycle["next_check_in_seconds"],
+            }
+        )
 
     @app.route("/api/start-bot", methods=["POST"])
     def api_start_bot():
         slot_status_cache.start()
         return jsonify({"running": True})
+
+    @app.route("/api/stop-bot", methods=["POST"])
+    def api_stop_bot():
+        slot_status_cache.stop()
+        return jsonify({"running": False})
 
     @app.route("/booking")
     def booking():

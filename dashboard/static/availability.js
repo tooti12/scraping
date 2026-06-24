@@ -1,4 +1,4 @@
-// How often this page re-polls the cached status — purely a read of
+// How often this page re-polls the cached status, purely a read of
 // slot_status_cache.py's in-memory cache, never triggers a live check.
 const POLL_INTERVAL_MS = 30_000;
 
@@ -12,40 +12,52 @@ function timeAgo(isoString) {
   return `checked ${hours}h ago`;
 }
 
+const COMBO_BADGE = {
+  slots_available: ["status-success", "Slot available"],
+  no_slots: ["status-empty", "No slots"],
+};
+
 // Builds the status block for one country card from the same shape
 // slot_status_cache.get_all_status() / GET /api/status returns:
 // { status: "slots_available" | "no_slots" | "error", centre, appt_cat,
-//   sub_cat, slot_details, message, checked_at } — centre/appt_cat/sub_cat
-// are plain strings (see slot_check_service.check_country_slot), not
-// {id, text} objects.
+//   combos: [{ sub_cat, status, slot_details }, ...], message, checked_at }.
+// combos has one entry per sub-category checked (just "Tourism" when the
+// mission offers it, every sub-category it does offer otherwise) — see
+// slot_check_service.check_country_slot. Pure discovery failures (couldn't
+// log in, no centre/category found at all) have no combos, just "message".
 function renderCountryStatus(container, s) {
   if (!s) {
     // No result cached yet for this country (first check still in
-    // progress) — leave it blank, just the flag/code/name from the card
+    // progress). Leave it blank, just the flag/code/name from the card
     // shell, no placeholder text.
     container.innerHTML = "";
     return;
   }
 
-  let badgeClass = "status-error";
-  let badgeText = "Check failed";
-  let detail = s.message || "Will retry on the next pass.";
-
-  if (s.status === "slots_available") {
-    badgeClass = "status-success";
-    badgeText = "Slot available";
-    detail = s.slot_details || [s.centre, s.appt_cat, s.sub_cat].filter(Boolean).join(" · ");
-  } else if (s.status === "no_slots") {
-    badgeClass = "status-empty";
-    badgeText = "No slots";
-    detail = s.slot_details || "No appointment slots are currently available.";
+  if (!s.combos || !s.combos.length) {
+    container.innerHTML = `
+      <span class="status-badge status-error">Check failed</span>
+      <p class="status-detail">${s.message || "Will retry on the next pass."}</p>
+      <p class="status-time">${timeAgo(s.checked_at)}</p>
+    `;
+    return;
   }
 
-  container.innerHTML = `
-    <span class="status-badge ${badgeClass}">${badgeText}</span>
-    <p class="status-detail">${detail}</p>
-    <p class="status-time">${timeAgo(s.checked_at)}</p>
-  `;
+  const rows = s.combos
+    .map((c) => {
+      const [badgeClass, badgeText] = COMBO_BADGE[c.status] || ["status-error", "Check failed"];
+      const detail = c.slot_details ? `<p class="status-detail">${c.slot_details}</p>` : "";
+      return `
+        <div class="combo-row">
+          <span class="combo-label">${c.sub_cat}:</span>
+          <span class="status-badge ${badgeClass}">${badgeText}</span>
+        </div>
+        ${detail}
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `${rows}<p class="status-time">${timeAgo(s.checked_at)}</p>`;
 }
 
 function refreshStatus() {
@@ -64,26 +76,222 @@ function refreshStatus() {
 refreshStatus();
 setInterval(refreshStatus, POLL_INTERVAL_MS);
 
-// ── Start Bot — kicks off slot_status_cache.py's background loop; it
-// doesn't run on its own until this is clicked. ──────────────────────────
+// ── Start Bot: kicks off slot_status_cache.py's background loop; it
+// doesn't run on its own until this is clicked. The modal loader (spinner +
+// stop button) only ever covers the very first cycle — slot_status_cache.py
+// then keeps alternating "checking" / "resting" forever, which #bot-control
+// reflects via a continuous /api/bot-status poll. Wrapped in an IIFE:
+// coming-soon.js (loaded on this same page) already declares top-level
+// `overlay`/`resultBox`/`closeOverlay`, and classic <script> tags share one
+// global scope, so these names can't be redeclared at the top level here.
+(function () {
+const overlay = document.getElementById("result-overlay");
+const resultBox = document.getElementById("result-box");
+const control = document.getElementById("bot-control");
 
-function showBotRunning() {
-  const control = document.getElementById("bot-control");
-  if (!control) return;
-  control.innerHTML = '<span id="bot-status-text" class="hero-cta hero-cta--running">Bot is running</span>';
+const STOP_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+
+const POLL_BOT_STATUS_MS = 4000;
+
+let loaderPollTimer = null;
+let statusPollTimer = null;
+let countdownTimer = null;
+let countdownRemaining = 0;
+// Dedupe — avoid tearing down and rebuilding #bot-control (and its
+// 1-second countdown ticker) on every single poll when nothing changed.
+let renderedState = null;
+
+function clearCountdown() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
 }
 
-const startBotBtn = document.getElementById("start-bot-btn");
-if (startBotBtn) {
-  startBotBtn.addEventListener("click", () => {
-    startBotBtn.disabled = true;
-    startBotBtn.textContent = "Starting…";
+function bindStartButton(btn) {
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+    // This mutates the button directly instead of going through
+    // renderStartButton(), so the dedupe cache no longer matches what's
+    // actually on screen — invalidate it, otherwise a later
+    // renderStartButton() call (e.g. from the stop button) would see
+    // renderedState === "idle" and wrongly skip rebuilding this stale
+    // disabled button back to a clickable one.
+    renderedState = null;
+    showChecking();
     fetch("/api/start-bot", { method: "POST" })
-      .then((r) => r.json())
-      .then(() => showBotRunning())
+      .then(() => pollUntilFirstCycle())
       .catch(() => {
-        startBotBtn.disabled = false;
-        startBotBtn.textContent = "Start Bot";
+        closeChecking();
+        renderStartButton();
       });
   });
 }
+
+function renderStartButton() {
+  if (!control || renderedState === "idle") return;
+  renderedState = "idle";
+  clearCountdown();
+  control.innerHTML = '<button id="start-bot-btn" class="hero-cta">Start Bot</button>';
+  bindStartButton(document.getElementById("start-bot-btn"));
+}
+
+function renderChecking() {
+  if (!control || renderedState === "checking") return;
+  renderedState = "checking";
+  clearCountdown();
+  control.innerHTML = '<span class="hero-cta hero-cta--running">Checking all countries…</span>';
+}
+
+function updateCountdownText() {
+  const el = document.getElementById("rest-countdown");
+  if (el) el.textContent = `Bot will start in ${countdownRemaining}s`;
+}
+
+// next_check_in_seconds comes straight from slot_status_cache's
+// REFRESH_INTERVAL_SECONDS (set the moment a cycle finishes), so the very
+// first render of this state always starts the countdown at that
+// configured value, not some arbitrary number.
+function renderResting(seconds) {
+  if (!control) return;
+  countdownRemaining = seconds;
+  if (renderedState !== "resting") {
+    renderedState = "resting";
+    clearCountdown();
+    control.innerHTML =
+      '<div class="bot-resting">' +
+      '<span class="hero-cta hero-cta--resting">Restarting</span>' +
+      '<p class="bot-resting-timer" id="rest-countdown"></p>' +
+      "</div>";
+    countdownTimer = setInterval(() => {
+      countdownRemaining = Math.max(0, countdownRemaining - 1);
+      updateCountdownText();
+    }, 1000);
+  }
+  updateCountdownText();
+}
+
+// Single source of truth for #bot-control's appearance once the bot is
+// past its first cycle (before that, the modal loader owns it instead).
+function renderBotControl(data) {
+  if (!data.running) {
+    renderStartButton();
+  } else if (data.checking) {
+    renderChecking();
+  } else {
+    renderResting(data.next_check_in_seconds ?? 0);
+  }
+}
+
+function pollStatusForever() {
+  fetch("/api/bot-status")
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.running && !data.first_cycle_done) return; // modal loader owns this phase
+      renderBotControl(data);
+    })
+    .catch(() => {})
+    .finally(() => {
+      statusPollTimer = setTimeout(pollStatusForever, POLL_BOT_STATUS_MS);
+    });
+}
+
+// ── Modal loader — first cycle only ──────────────────────────────────────
+
+function closeChecking() {
+  if (loaderPollTimer) {
+    clearTimeout(loaderPollTimer);
+    loaderPollTimer = null;
+  }
+  overlay.hidden = true;
+  overlay.dataset.lock = "false";
+  resultBox.innerHTML = "";
+  resultBox.classList.remove("boxed");
+}
+
+// Only the stop button calls this — clicking the backdrop or anywhere else
+// on the loader must NOT dismiss it (see coming-soon.js's lock check too).
+function stopBotAndClose() {
+  fetch("/api/stop-bot", { method: "POST" }).catch(() => {});
+  closeChecking();
+  renderStartButton();
+}
+
+function showChecking() {
+  overlay.hidden = false;
+  overlay.dataset.lock = "true";
+  resultBox.innerHTML = "";
+  resultBox.classList.remove("boxed");
+
+  const wrap = document.createElement("div");
+  wrap.className = "result-loading";
+
+  const heading = document.createElement("p");
+  heading.className = "loading-title";
+  heading.textContent = "Checking all countries";
+
+  const spinner = document.createElement("span");
+  spinner.className = "loader";
+
+  const status = document.createElement("p");
+  status.className = "loading-status";
+  status.textContent =
+    "This can take a few minutes. It stays open until every country's been checked — click the stop button to stop the bot instead.";
+
+  const stopBtn = document.createElement("button");
+  stopBtn.className = "loader-stop";
+  stopBtn.type = "button";
+  stopBtn.title = "Stop the bot";
+  stopBtn.setAttribute("aria-label", "Stop the bot");
+  stopBtn.innerHTML = STOP_ICON;
+  stopBtn.onclick = stopBotAndClose;
+
+  wrap.appendChild(heading);
+  wrap.appendChild(spinner);
+  wrap.appendChild(status);
+  wrap.appendChild(stopBtn);
+  resultBox.appendChild(wrap);
+}
+
+function pollUntilFirstCycle() {
+  fetch("/api/bot-status")
+    .then((r) => r.json())
+    .then((data) => {
+      if (!data.running) {
+        // Stopped from elsewhere (another tab, or the backend exiting).
+        closeChecking();
+        renderStartButton();
+        return;
+      }
+      if (data.first_cycle_done) {
+        closeChecking();
+        refreshStatus();
+        renderBotControl(data);
+        return;
+      }
+      loaderPollTimer = setTimeout(pollUntilFirstCycle, POLL_BOT_STATUS_MS);
+    })
+    .catch(() => {
+      loaderPollTimer = setTimeout(pollUntilFirstCycle, POLL_BOT_STATUS_MS);
+    });
+}
+
+// ── Boot: figure out which of the above applies right now ───────────────
+
+fetch("/api/bot-status")
+  .then((r) => r.json())
+  .then((data) => {
+    if (data.running && !data.first_cycle_done) {
+      showChecking();
+      pollUntilFirstCycle();
+    } else {
+      renderBotControl(data);
+    }
+  })
+  .catch(() => {})
+  .finally(() => {
+    statusPollTimer = setTimeout(pollStatusForever, POLL_BOT_STATUS_MS);
+  });
+})();

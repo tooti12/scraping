@@ -2,7 +2,10 @@
 import base64
 import json
 import os
+import re
+import secrets
 import socket
+import string
 import threading
 
 from seleniumbase import SB
@@ -10,6 +13,26 @@ from seleniumbase.core import proxy_helper as _sb_proxy_helper
 
 from booking_flow import BookingFlow
 from config import APPLICANT_CONFIG, COUNTRY_CONFIG, PROXY_CONFIG
+
+# Our residential proxy provider (VFS_PROXY_URL) encodes a sticky-session id
+# in the proxy username, e.g. "...-session-av7gkchx-country-gb-rotation-0" —
+# every connection presenting that exact username gets handed the *same*
+# exit IP for as long as that id is reused. VFS_PROXY_URL hardcodes one
+# fixed id, so left alone, every BrowserClient (every country, every check)
+# was sharing one exit IP. Replacing it with a fresh random id per
+# BrowserClient gets each browser launch its own IP from the provider
+# instead — see README.md's "Proxy" section.
+_PROXY_SESSION_RE = re.compile(r"session-[A-Za-z0-9]+")
+
+
+def _randomize_proxy_session(username: str) -> str:
+    new_id = "session-" + "".join(
+        secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8)
+    )
+    new_username, count = _PROXY_SESSION_RE.subn(new_id, username)
+    # No "session-..." segment in this username at all (e.g. a differently
+    # configured provider) — nothing to randomize, leave it untouched.
+    return new_username if count else username
 
 
 class LocalAuthProxy:
@@ -275,8 +298,12 @@ class BrowserClient:
             proxy_str = PROXY_CONFIG["proxy"]
             creds, host_port = proxy_str.rsplit("@", 1)
             username, password = creds.split(":", 1)
+            username = _randomize_proxy_session(username)
             remote_host, remote_port = host_port.rsplit(":", 1)
+            session_match = _PROXY_SESSION_RE.search(username)
             print(f"[BrowserClient]   remote proxy: {remote_host}:{remote_port}")
+            if session_match:
+                print(f"[BrowserClient]   proxy {session_match.group()} (fresh exit IP for this launch)")
             # Start local forwarding proxy — Chrome connects to localhost with no
             # auth, LocalAuthProxy injects credentials and forwards to the real proxy.
             # This eliminates the native proxy-auth dialog entirely.
@@ -1041,13 +1068,20 @@ class BrowserClient:
         self, centre_keyword: str = "london", sub_cat_keywords=("tourist", "tourism")
     ) -> dict:
         """
-        Pick the first centre matching `centre_keyword`, its first
-        appointment category, and the first sub-category matching
-        `sub_cat_keywords`, submit, and report the result — read only.
+        Pick the first centre matching `centre_keyword` and its first
+        appointment category. For the sub-category dropdown: if one option
+        matches `sub_cat_keywords` (Tourist/Tourism), check only that one,
+        same narrow scope as before. Some missions don't offer Tourism at
+        all (e.g. only "Long Stay"/"Short Stay") — in that case there's no
+        single right option to assume, so every sub-category on offer gets
+        its own check instead of guessing or giving up.
 
-        Returns a dict with at least a "result" key
-        ("slots_available" | "no_slots" | "error") plus whichever of
-        "centre"/"appt_cat"/"sub_cat"/"slot_details"/"reason" apply.
+        Returns a dict with "centre", "appt_cat", and "combos" — a list of
+        {"sub_cat", "result", "slot_details"} dicts, one per sub-category
+        checked (just one entry when Tourism was found). On a discovery
+        failure (no matching centre, no categories, or no sub-categories at
+        all) returns {"result": "error", "reason": ...} instead, with
+        whichever of "centre"/"appt_cat" were already resolved.
         """
         self._navigate_to_booking_form()
 
@@ -1072,29 +1106,46 @@ class BrowserClient:
         self.sb.sleep(2)
 
         sub_cats = self._read_mat_options("mat-select-1")
-        sub_cat = next(
-            (s for s in sub_cats if s["text"].lower() in sub_cat_keywords), None
-        )
-        if not sub_cat:
-            self._log(f"No sub-category matching {sub_cat_keywords} found.")
+        if not sub_cats:
+            self._log("No sub-category options found.")
             return {
                 "result": "error",
                 "reason": "sub_category_not_found",
                 "centre": centre,
                 "appt_cat": appt_cat,
             }
-        self._select_mat_option("mat-select-1", sub_cat["id"])
-        self.sb.sleep(2)
 
-        result, slot_details = self._submit_and_read_result()
-        self._log(f"check_slot_only result: {result} — {slot_details}")
-        return {
-            "centre": centre,
-            "appt_cat": appt_cat,
-            "sub_cat": sub_cat,
-            "result": result,
-            "slot_details": slot_details,
-        }
+        tourism_matches = [s for s in sub_cats if s["text"].lower() in sub_cat_keywords]
+        sub_cats_to_check = tourism_matches or sub_cats
+        self._log(
+            f"Checking sub-categor{'y' if len(sub_cats_to_check) == 1 else 'ies'}: "
+            f"{[s['text'] for s in sub_cats_to_check]}"
+        )
+
+        combos = []
+        for i, sub_cat in enumerate(sub_cats_to_check):
+            if i > 0:
+                # A submit can knock Angular off the form or reset its
+                # dropdowns, same as check_all_combinations() sees — re-pick
+                # centre and appt-category from scratch rather than assume
+                # they survived the previous submission.
+                self._ensure_on_form()
+                self._select_mat_option("mat-select-0", centre["id"])
+                self.sb.sleep(3)
+                self._select_mat_option("mat-select-2", appt_cat["id"])
+                self.sb.sleep(3)
+
+            self._select_mat_option("mat-select-1", sub_cat["id"])
+            self.sb.sleep(2)
+
+            result, slot_details = self._submit_and_read_result()
+            self._log(f"check_slot_only result ({sub_cat['text']}): {result} — {slot_details}")
+            combos.append({"sub_cat": sub_cat, "result": result, "slot_details": slot_details})
+
+            if i < len(sub_cats_to_check) - 1:
+                self.sb.sleep(2)
+
+        return {"centre": centre, "appt_cat": appt_cat, "combos": combos}
 
     def call_check_slot(self, login_user: str, jwt_token: str):
         cfg = self._config

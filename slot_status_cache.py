@@ -41,10 +41,10 @@ the whole slot-check after login) runs concurrently.
 
 The loop doesn't start on its own — it only begins once a visitor clicks
 "Start Bot" on /availability (see start()/is_running() and
-dashboard/app.py's /api/start-bot). Once started it keeps running forever
-in the background; every page load and /api/status poll after that just
-reads the resulting cache, and visitor traffic can never block or be
-blocked by it. See DEPLOYMENT.md.
+dashboard/app.py's /api/start-bot), and runs until a visitor explicitly
+stops it (stop()/dashboard/app.py's /api/stop-bot) or the process exits.
+Every page load and /api/status poll just reads the resulting cache, and
+visitor traffic can never block or be blocked by it. See DEPLOYMENT.md.
 """
 import multiprocessing as mp
 import sys
@@ -56,7 +56,11 @@ from config import COUNTRIES
 from slot_check_service import check_country_slot
 
 # One full pass over all countries, then wait this long before the next pass.
-REFRESH_INTERVAL_SECONDS = 300
+REFRESH_INTERVAL_SECONDS = 60
+
+# Pause this long after one country's check finishes before starting the
+# next one, so checks don't slam VFS back-to-back.
+COUNTRY_BREAK_SECONDS = 35
 
 # See module docstring — full parallelism is only safe where every Chrome
 # session gets its own real (virtual) display.
@@ -67,8 +71,11 @@ MAX_CONCURRENT_COUNTRIES = len(COUNTRIES) if sys.platform.startswith("linux") el
 # would freeze the whole loop and every other country's cached status would
 # go stale forever instead of just that one country reporting an error. This
 # bounds how long a single country's *process* runs before its own internal
-# watchdog (in _check_one) force-quits its browser and lets it exit.
-CHECK_TIMEOUT_SECONDS = 420
+# watchdog (in _check_one) force-quits its browser and lets it exit. Sized
+# generously because check_slot_only() may now submit several sub-category
+# combinations (one captcha-solve + banner-wait each) for missions that
+# don't offer Tourism, not just one.
+CHECK_TIMEOUT_SECONDS = 900
 
 # Extra time the parent process gives a country's process to actually exit
 # after CHECK_TIMEOUT_SECONDS, before concluding the process itself (not
@@ -139,7 +146,7 @@ def _run_one_cycle() -> None:
     started_at: dict = {}
 
     def spawn_next():
-        if not pending:
+        if not pending or _stop_event.is_set():
             return
         code = pending.pop(0)
         p = mp.Process(target=_process_entry, args=(code, login_lock, result_queue), daemon=True)
@@ -150,7 +157,7 @@ def _run_one_cycle() -> None:
     for _ in range(min(MAX_CONCURRENT_COUNTRIES, len(pending))):
         spawn_next()
 
-    while processes or pending:
+    while processes or (pending and not _stop_event.is_set()):
         try:
             code, result = result_queue.get(timeout=1)
         except Exception:
@@ -161,6 +168,11 @@ def _run_one_cycle() -> None:
                 _status[code] = {**result, "checked_at": datetime.now(timezone.utc).isoformat()}
             processes.pop(code, None)
             started_at.pop(code, None)
+            # A stop request stops new countries from starting, but never
+            # force-quits a check already in flight — those finish (or hit
+            # their own CHECK_TIMEOUT_SECONDS watchdog) naturally.
+            if pending and not _stop_event.is_set():
+                _stop_event.wait(timeout=COUNTRY_BREAK_SECONDS)
             spawn_next()
 
         # Any process that's blown past its own in-process watchdog plus
@@ -186,18 +198,62 @@ def _run_one_cycle() -> None:
 
 
 def _run_loop():
-    while True:
+    global _first_cycle_done, _is_checking, _next_cycle_at
+    while not _stop_event.is_set():
+        with _started_lock:
+            _is_checking = True
+            _next_cycle_at = None
         _run_one_cycle()
-        time.sleep(REFRESH_INTERVAL_SECONDS)
+        with _started_lock:
+            _is_checking = False
+        if _stop_event.is_set():
+            # Stopped mid-cycle — not every country actually got checked,
+            # so this pass doesn't count toward first_cycle_done.
+            break
+        with _started_lock:
+            _first_cycle_done = True
+            _next_cycle_at = time.time() + REFRESH_INTERVAL_SECONDS
+        _stop_event.wait(timeout=REFRESH_INTERVAL_SECONDS)
+    with _started_lock:
+        _started = False
+        _is_checking = False
+        _next_cycle_at = None
 
 
 _started = False
+_first_cycle_done = False
+_is_checking = False
+_next_cycle_at: float | None = None
 _started_lock = threading.Lock()
+_stop_event = threading.Event()
 
 
 def is_running() -> bool:
     with _started_lock:
         return _started
+
+
+def first_cycle_done() -> bool:
+    """True once every country has been checked at least once since the
+    most recent start() — what the frontend polls to know when it can stop
+    showing the "checking all countries" loader and just read the cache."""
+    with _started_lock:
+        return _first_cycle_done
+
+
+def get_cycle_state() -> dict:
+    """What the loop is doing right now, for the frontend's "Bot is
+    resting" countdown between cycles. "checking" is True while a pass over
+    every country is actively running (including the very first one, before
+    first_cycle_done); when it's False and the loop is running,
+    "next_check_in_seconds" counts down to the next pass."""
+    with _started_lock:
+        if not _started:
+            return {"checking": False, "next_check_in_seconds": None}
+        if _is_checking or _next_cycle_at is None:
+            return {"checking": True, "next_check_in_seconds": None}
+        remaining = max(0, round(_next_cycle_at - time.time()))
+        return {"checking": False, "next_check_in_seconds": remaining}
 
 
 def start() -> bool:
@@ -207,10 +263,27 @@ def start() -> bool:
     /api/start-bot). Safe to call more than once (e.g. every click, or from
     more than one browser tab) — only the first call actually starts
     anything. Returns True if this call is the one that started it."""
-    global _started
+    global _started, _first_cycle_done, _is_checking, _next_cycle_at
     with _started_lock:
         if _started:
             return False
         _started = True
+        _is_checking = False
+        _next_cycle_at = None
+        _first_cycle_done = False
+        _stop_event.clear()
         threading.Thread(target=_run_loop, daemon=True).start()
         return True
+
+
+def stop() -> None:
+    """Signals the background loop to stop: no new country checks get
+    started, but whatever's already running in-flight is left to finish on
+    its own rather than force-quit mid-check. is_running() flips to False
+    immediately so the frontend can offer "Start Bot" again right away;
+    a fresh start() after that begins a brand new cycle from scratch. Safe
+    to call even when nothing is running."""
+    global _started
+    _stop_event.set()
+    with _started_lock:
+        _started = False

@@ -9,8 +9,11 @@ click and does not work in a headless browser.
 
 Deliberately separate from main.py's continuous monitor and from
 booking_flow.py's human-in-the-loop booking pipeline — this module only
-logs in, checks London-centre/Tourism-category availability for one
-country, and returns a plain result dict. It never books anything.
+logs in and checks London-centre availability for one country, returning a
+plain result dict. It never books anything. Sub-category scope is Tourism
+when the mission offers it, otherwise every sub-category the mission does
+offer (see BrowserClient.check_slot_only) — there's no single "Tourism" to
+fall back to for every country.
 """
 from auth_handler import AuthHandler
 from browser_client import BrowserClient
@@ -18,8 +21,12 @@ from config import SHARED_VFS_ACCOUNT
 
 
 def check_country_slot(country: str, on_status=None, on_browser=None, login_lock=None) -> dict:
-    """Run one slot check for `country`. Always returns a dict
-    with a "status" key: "slots_available" | "no_slots" | "error".
+    """Run one slot check for `country`. Always returns a dict with a
+    "status" key: "slots_available" | "no_slots" | "error". Non-error
+    results also carry "centre", "appt_cat", and "combos" — a list of
+    {"sub_cat", "status", "slot_details"} dicts, one per sub-category
+    checked (e.g. "Tourism", or "Long Stay"/"Short Stay" for missions
+    without Tourism); "status" is overall across all of them.
 
     on_status, if given, is called with a short event-name string at each
     real milestone (connecting, logging in, OTP wait, etc.) — this is what
@@ -69,17 +76,28 @@ def check_country_slot(country: str, on_status=None, on_browser=None, login_lock
         print(f"[slot_check_service] Check failed for {country}: {e}")
         return {"status": "error", "message": "Something went wrong while checking. Please try again."}
 
-    result = outcome.get("result")
-    if result == "slots_available":
+    combos = outcome.get("combos")
+    if combos is not None:
+        combo_results = [
+            {
+                "sub_cat": c["sub_cat"]["text"],
+                "status": c["result"],
+                "slot_details": c.get("slot_details", ""),
+            }
+            for c in combos
+        ]
+        if any(c["status"] == "slots_available" for c in combo_results):
+            overall_status = "slots_available"
+        elif any(c["status"] == "no_slots" for c in combo_results):
+            overall_status = "no_slots"
+        else:
+            overall_status = "error"
         return {
-            "status": "slots_available",
+            "status": overall_status,
             "centre": outcome["centre"]["text"],
             "appt_cat": outcome["appt_cat"]["text"],
-            "sub_cat": outcome["sub_cat"]["text"],
-            "slot_details": outcome.get("slot_details", ""),
+            "combos": combo_results,
         }
-    if result == "no_slots":
-        return {"status": "no_slots", "slot_details": outcome.get("slot_details", "")}
 
     reason = outcome.get("reason", "unexpected_error")
     return {"status": "error", "message": f"Could not complete the check ({reason})."}

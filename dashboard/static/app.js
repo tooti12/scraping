@@ -158,7 +158,7 @@ function clearPrompt() {
   setStep("Working…", "info");
   promptContainer.innerHTML =
     '<div class="empty-state"><span class="loader"></span>' +
-    '<p class="muted">No action needed right now — waiting on the bot.</p></div>';
+    '<p class="muted">No action needed right now, waiting on the bot.</p></div>';
 }
 
 function submitAnswer(promptId, value) {
@@ -193,7 +193,7 @@ function infoGrid(pairs) {
 
 function renderBookingPrompt(promptId, payload) {
   const box = el("div", { className: "prompt-box" });
-  box.appendChild(el("h3", { text: "Slot available — proceed to booking?" }));
+  box.appendChild(el("h3", { text: "Slot available: proceed to booking?" }));
   box.appendChild(
     infoGrid([
       ["Country", (payload.country || "").toUpperCase()],
@@ -233,7 +233,7 @@ function renderApplicantPrompt(promptId, payload) {
     })
   );
 
-  // Fields are discovered live from the VFS form, not hard-coded — each
+  // Fields are discovered live from the VFS form, not hard-coded. Each
   // entry's label/required-ness reflects exactly what that country/visa
   // category currently shows, so this form is built dynamically.
   const fields = payload.fields || [];
@@ -429,7 +429,7 @@ function renderCardPrompt(promptId, payload) {
   form.appendChild(
     el("p", {
       className: "security-note",
-      text: "Card details go straight to VFS's payment processor — never logged or stored by this dashboard.",
+      text: "Card details go straight to VFS's payment processor, never logged or stored by this dashboard.",
     })
   );
 
