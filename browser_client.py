@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import platform
 import re
 import secrets
 import socket
@@ -13,6 +14,33 @@ from seleniumbase.core import proxy_helper as _sb_proxy_helper
 
 from booking_flow import BookingFlow
 from config import APPLICANT_CONFIG, COUNTRY_CONFIG, PROXY_CONFIG
+
+# Linux-only: on dev machines where this runs inside a terminal launched from
+# the VSCode snap, the shell carries GTK/GIO env vars pointing at the snap's
+# own confined module cache (GIO_MODULE_DIR etc.) plus XDG_SESSION_TYPE=
+# wayland. Non-headless Chrome inherits these, its GTK UI init tries to load
+# an incompatible Qt-based GIO module from the snap, and it aborts with a Qt
+# "no platform plugin" SIGABRT before the CDP debugger port ever comes up —
+# this is what "chrome crashed with SIGABRT" / "cannot connect to chrome at
+# 127.0.0.1:9222" actually is. Headless Chrome never hits this path (no GTK
+# UI init), and it doesn't happen on Windows at all (no GTK/X11), hence the
+# platform check. xvfb=True (below, in BrowserClient) gives each session its
+# own virtual display, but that alone doesn't fix this — the crash is from
+# inherited env vars, not from which display Chrome uses.
+if platform.system() == "Linux":
+    for _var in (
+        "GIO_MODULE_DIR",
+        "GTK_PATH",
+        "GTK_EXE_PREFIX",
+        "GTK_IM_MODULE_FILE",
+        "GTK_MODULES",
+        "XDG_SESSION_TYPE",
+        "XDG_SESSION_DESKTOP",
+        "XDG_SESSION_CLASS",
+        "GIO_LAUNCHED_DESKTOP_FILE",
+        "GIO_LAUNCHED_DESKTOP_FILE_PID",
+    ):
+        os.environ.pop(_var, None)
 
 # Our residential proxy provider (VFS_PROXY_URL) encodes a sticky-session id
 # in the proxy username, e.g. "...-session-av7gkchx-country-gb-rotation-0" —
