@@ -116,36 +116,51 @@ class AuthHandler:
         # safe here because each session has its own isolated virtual
         # display, see browser_client.py) and clicks Login, which is what
         # makes VFS send the OTP email. Called inside login_lock.
+        # solve_captcha() handles a visible Cloudflare dialog if one appears.
+        # The VFS login page also embeds an *invisible* Turnstile iframe that
+        # keeps the submit button disabled until it silently validates browser
+        # signals. On Xvfb/datacenter IPs this check is stricter and takes
+        # longer — uc_gui_click_captcha() finds and clicks the Turnstile
+        # iframe directly, which is what triggers it to run its validation.
         print("[AuthHandler] Solving captcha (post-credential)...")
         self.browser.solve_captcha()
 
-        # Verify the login button is enabled before clicking.
-        # A disabled button means Cloudflare Turnstile hasn't finished its
-        # background verification yet — clicking it now does nothing and the
-        # form is never submitted. Wait up to 15 s for it to become enabled.
-        print("[AuthHandler] Checking login button is enabled...")
+        # Immediately attempt a UC-level click on the Turnstile iframe so it
+        # begins its validation without waiting for the polling loop below.
+        print("[AuthHandler] Clicking Turnstile iframe (inline, not a dialog)...")
+        try:
+            self.browser.sb.uc_gui_click_captcha()
+            print("[AuthHandler] Turnstile click sent.")
+        except Exception as e:
+            print(f"[AuthHandler] Turnstile click: {type(e).__name__}: {e}")
+
+        # Poll until the button is enabled (Turnstile validated) or we give
+        # up. Retry the Turnstile click at t=5 and t=15 if still blocked.
+        print("[AuthHandler] Waiting for login button to become enabled...")
         btn_enabled = False
-        for i in range(15):
+        for i in range(30):
             try:
                 btn = self.browser.sb.driver.find_element("css selector", "button.mat-btn-lg")
                 disabled_attr = btn.get_attribute("disabled")
-                aria_disabled = btn.get_attribute("aria-disabled")
-                btn_enabled = btn.is_enabled() and not disabled_attr and aria_disabled != "true"
-                print(f"[AuthHandler] Login button — enabled={btn_enabled} disabled_attr={disabled_attr!r} aria-disabled={aria_disabled!r} (t={i}s)")
+                btn_enabled = btn.is_enabled() and not disabled_attr
+                print(f"[AuthHandler] Login button — enabled={btn_enabled} disabled_attr={disabled_attr!r} (t={i}s)")
                 if btn_enabled:
                     break
+                if i in (5, 15):
+                    print(f"[AuthHandler] Still disabled at t={i}s — retrying Turnstile click...")
+                    try:
+                        self.browser.sb.uc_gui_click_captcha()
+                    except Exception as e:
+                        print(f"[AuthHandler] Turnstile retry: {type(e).__name__}: {e}")
             except Exception as e:
                 print(f"[AuthHandler] Could not read button state: {e}")
             self.browser.sb.sleep(1)
 
         if not btn_enabled:
-            print("[AuthHandler] WARNING: login button still disabled after 15s — Turnstile may not have completed. Clicking anyway.")
+            print("[AuthHandler] WARNING: button still disabled after 30s — Turnstile did not complete. Clicking anyway.")
 
         print("[AuthHandler] Clicking login button...")
         self.browser.sb.driver.uc_click("button.mat-btn-lg")
-        # Give Cloudflare Turnstile time to complete its invisible
-        # background verification before VFS processes the submission.
-        # On datacenter IPs the check takes longer than on residential.
         self.browser.sb.sleep(5)
 
 
