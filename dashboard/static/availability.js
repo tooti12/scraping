@@ -98,6 +98,7 @@ let loaderPollTimer = null;
 let statusPollTimer = null;
 let countdownTimer = null;
 let countdownRemaining = 0;
+let logEventSource = null;
 // Dedupe — avoid tearing down and rebuilding #bot-control (and its
 // 1-second countdown ticker) on every single poll when nothing changed.
 let renderedState = null;
@@ -205,6 +206,10 @@ function closeChecking() {
     clearTimeout(loaderPollTimer);
     loaderPollTimer = null;
   }
+  if (logEventSource) {
+    logEventSource.close();
+    logEventSource = null;
+  }
   overlay.hidden = true;
   overlay.dataset.lock = "false";
   resultBox.innerHTML = "";
@@ -217,6 +222,27 @@ function stopBotAndClose() {
   fetch("/api/stop-bot", { method: "POST" }).catch(() => {});
   closeChecking();
   renderStartButton();
+}
+
+function _openLogStream(logPane) {
+  if (logEventSource) {
+    logEventSource.close();
+    logEventSource = null;
+  }
+  const es = new EventSource("/api/log-stream");
+  logEventSource = es;
+  es.onmessage = (e) => {
+    try {
+      const { line } = JSON.parse(e.data);
+      if (!line || !line.trim()) return;
+      const el = document.createElement("div");
+      el.className = "log-line";
+      el.textContent = line;
+      logPane.appendChild(el);
+      logPane.scrollTop = logPane.scrollHeight;
+    } catch (_) {}
+  };
+  es.onerror = () => {};
 }
 
 function showChecking() {
@@ -235,10 +261,8 @@ function showChecking() {
   const spinner = document.createElement("span");
   spinner.className = "loader";
 
-  const status = document.createElement("p");
-  status.className = "loading-status";
-  status.textContent =
-    "This can take a few minutes. It stays open until every country's been checked — click the stop button to stop the bot instead.";
+  const logPane = document.createElement("div");
+  logPane.className = "log-pane";
 
   const stopBtn = document.createElement("button");
   stopBtn.className = "loader-stop";
@@ -250,9 +274,11 @@ function showChecking() {
 
   wrap.appendChild(heading);
   wrap.appendChild(spinner);
-  wrap.appendChild(status);
+  wrap.appendChild(logPane);
   wrap.appendChild(stopBtn);
   resultBox.appendChild(wrap);
+
+  _openLogStream(logPane);
 }
 
 function pollUntilFirstCycle() {

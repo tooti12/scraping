@@ -82,6 +82,8 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from queue import Empty
+from queue import Queue as ThreadQueue
 
 from config import COUNTRIES
 from slot_check_service import run_country_worker
@@ -138,6 +140,47 @@ PROCESS_JOIN_GRACE_SECONDS = 60
 
 _lock = threading.Lock()
 _status: dict = {}
+
+# ── Live log stream ───────────────────────────────────────────────────────
+# Worker processes write to _logs_queue (mp.Queue). A relay thread reads
+# from it and fans out to each connected SSE client's ThreadQueue.
+_logs_queue = None
+_log_subs: list[ThreadQueue] = []
+_log_subs_lock = threading.Lock()
+
+
+def subscribe_logs() -> ThreadQueue:
+    q: ThreadQueue = ThreadQueue(maxsize=500)
+    with _log_subs_lock:
+        _log_subs.append(q)
+    return q
+
+
+def unsubscribe_logs(q: ThreadQueue) -> None:
+    with _log_subs_lock:
+        try:
+            _log_subs.remove(q)
+        except ValueError:
+            pass
+
+
+def _broadcast_log(line: str) -> None:
+    with _log_subs_lock:
+        for q in list(_log_subs):
+            try:
+                q.put_nowait(line)
+            except Exception:
+                pass
+
+
+def _log_relay() -> None:
+    """Reads log lines from workers (via mp Queue) and fans out to SSE clients."""
+    while not _stop_event.is_set():
+        try:
+            line = _logs_queue.get(timeout=1)
+            _broadcast_log(line)
+        except Exception:
+            pass
 # country code -> epoch seconds until which _run_one_cycle() won't retry it.
 # country code -> {"process": mp.Process, "command_queue": mp.Queue}, one
 # entry per country's long-lived worker (see module docstring). Both dicts
@@ -164,7 +207,7 @@ def _spawn_worker(code: str) -> None:
     command_queue = mp.Queue()
     p = mp.Process(
         target=run_country_worker,
-        args=(code, command_queue, _result_queue, _login_lock, CHECK_TIMEOUT_SECONDS),
+        args=(code, command_queue, _result_queue, _login_lock, CHECK_TIMEOUT_SECONDS, _logs_queue),
         daemon=True,
     )
     p.start()
@@ -364,7 +407,7 @@ def start() -> bool:
     anything. Returns True if this call is the one that started it; also
     False (refused, not just "already running") if a previous stop() is
     still tearing down its workers — see _loop_thread's comment."""
-    global _started, _first_cycle_done, _is_checking, _next_cycle_at, _login_lock, _result_queue, _loop_thread
+    global _started, _first_cycle_done, _is_checking, _next_cycle_at, _login_lock, _result_queue, _loop_thread, _logs_queue
     with _started_lock:
         if _started:
             return False
@@ -377,6 +420,8 @@ def start() -> bool:
         _stop_event.clear()
         _login_lock = mp.Lock()
         _result_queue = mp.Queue()
+        _logs_queue = mp.Queue()
+        threading.Thread(target=_log_relay, daemon=True).start()
         _loop_thread = threading.Thread(target=_run_loop, daemon=True)
         _loop_thread.start()
         return True

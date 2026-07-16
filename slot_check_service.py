@@ -171,7 +171,39 @@ def _run_with_watchdog(browser, fn, timeout_seconds):
     return holder["value"]
 
 
-def run_country_worker(country: str, command_queue, result_queue, login_lock=None, check_timeout_seconds=900) -> None:
+class _QueueWriter:
+    """Wraps a multiprocessing.Queue so print() output goes to it line by line."""
+
+    def __init__(self, q, original):
+        self._q = q
+        self._orig = original
+        self._buf = ""
+
+    def write(self, text):
+        self._orig.write(text)
+        self._orig.flush()
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            try:
+                self._q.put_nowait(line)
+            except Exception:
+                pass
+
+    def flush(self):
+        self._orig.flush()
+        if self._buf:
+            try:
+                self._q.put_nowait(self._buf)
+            except Exception:
+                pass
+            self._buf = ""
+
+    def __getattr__(self, name):
+        return getattr(self._orig, name)
+
+
+def run_country_worker(country: str, command_queue, result_queue, login_lock=None, check_timeout_seconds=900, log_queue=None) -> None:
     """Long-lived loop for one country, run in its own dedicated OS process
     by slot_status_cache.py. Logs in once, then answers each "check" command
     from `command_queue` with a result on `result_queue` (same shape as
@@ -181,6 +213,11 @@ def run_country_worker(country: str, command_queue, result_queue, login_lock=Non
     BrowserClient._navigate_to_booking_form), not on every single check.
     Exits cleanly on a "stop" command.
     """
+    import sys
+    if log_queue is not None:
+        sys.stdout = _QueueWriter(log_queue, sys.stdout)
+        sys.stderr = _QueueWriter(log_queue, sys.stderr)
+
     email = SHARED_VFS_ACCOUNT["email"]
     password = SHARED_VFS_ACCOUNT["password"]
 

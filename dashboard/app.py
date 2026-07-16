@@ -99,6 +99,28 @@ def create_app(bridge):
 
         return Response(stream(), mimetype="text/event-stream")
 
+    @app.route("/api/log-stream")
+    def log_stream():
+        q = slot_status_cache.subscribe_logs()
+
+        def stream():
+            try:
+                while True:
+                    try:
+                        line = q.get(timeout=20)
+                        yield f"data: {json.dumps({'line': line})}\n\n"
+                    except Exception:
+                        # Keep-alive heartbeat so proxy doesn't close idle connection
+                        yield ": keep-alive\n\n"
+            finally:
+                slot_status_cache.unsubscribe_logs(q)
+
+        return Response(
+            stream(),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.route("/api/answer", methods=["POST"])
     def answer():
         data = request.get_json(force=True) or {}

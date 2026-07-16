@@ -842,6 +842,39 @@ a {
   height: 18px;
 }
 
+/* Live log pane inside the checking loader */
+.log-pane {
+  width: 100%;
+  max-width: 520px;
+  height: 180px;
+  overflow-y: auto;
+  background: #0d0d0d;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  text-align: left;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-color-scheme: light) {
+  .log-pane {
+    background: #1a1a1a;
+  }
+}
+
+.log-line {
+  color: #b0c4b8;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-line:last-child {
+  color: #e0e0e0;
+}
+
 /* Result state */
 
 .result-box h2 {
