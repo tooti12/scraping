@@ -267,11 +267,7 @@ function _openLogStream(logPane) {
       const friendly = _friendlyLine(line);
       if (!friendly || friendly === lastText) return;
       lastText = friendly;
-      const el = document.createElement("div");
-      el.className = "log-line";
-      el.textContent = friendly;
-      logPane.appendChild(el);
-      logPane.scrollTop = logPane.scrollHeight;
+      logPane.textContent = friendly;
     } catch (_) {}
   };
   es.onerror = () => {};

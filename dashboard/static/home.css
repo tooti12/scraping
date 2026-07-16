@@ -842,30 +842,13 @@ a {
   height: 18px;
 }
 
-/* Live status lines inside the checking loader */
+/* Single replacing status line inside the checking loader */
 .log-pane {
-  width: 100%;
-  max-width: 380px;
-  max-height: 140px;
-  overflow-y: auto;
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-size: 0.85rem;
-  line-height: 2;
-  text-align: center;
-  scroll-behavior: smooth;
-}
-
-.log-line {
-  display: block;
   color: var(--muted);
-  transition: color 0.2s;
-}
-
-.log-line:last-child {
-  color: var(--text);
-  font-weight: 500;
+  font-size: 0.85rem;
+  min-height: 1.2em;
+  text-align: center;
+  transition: opacity 0.15s;
 }
 
 /* Result state */
