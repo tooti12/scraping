@@ -120,6 +120,10 @@ class AuthHandler:
         self.browser.solve_captcha()
         print("[AuthHandler] Clicking login button...")
         self.browser.sb.driver.uc_click("button.mat-btn-lg")
+        # Give Cloudflare Turnstile time to complete its invisible
+        # background verification before VFS processes the submission.
+        # On datacenter IPs the check takes longer than on residential.
+        self.browser.sb.sleep(5)
 
 
     def _enter_virtual_keyboard(self, key_sequence=None):
@@ -150,6 +154,25 @@ class AuthHandler:
             from notification_handler import EmailClient
             otp_client = EmailClient()
             print(f"[AuthHandler] Using legacy EmailClient for {email}")
+
+        # Log current page state so we can verify whether the login form
+        # submission actually went through before we start waiting for OTP.
+        _url = self.browser.sb.get_current_url()
+        print(f"[AuthHandler] URL before OTP wait: {_url}")
+        try:
+            _inputs = self.browser.sb.find_elements('input[id^="mat-input"]')
+            _ids = [el.get_attribute("id") for el in _inputs]
+            print(f"[AuthHandler] Visible mat-input fields: {_ids}")
+            # 2 inputs (email+password) = still on login form → submission failed
+            # 1 input (mat-input-3) = OTP step → correct
+        except Exception:
+            pass
+        try:
+            _err = self.browser.sb.get_text(".mat-error")
+            if _err and _err.strip():
+                print(f"[AuthHandler] Error on page: {_err.strip()!r}")
+        except Exception:
+            pass
 
         print("[AuthHandler] Waiting for OTP input field to appear (#mat-input-3)...")
         self.browser.sb.wait_for_element("#mat-input-3", timeout=80)
