@@ -1,0 +1,66 @@
+# ── Version-control metadata ──────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+
+# ── Secrets (passed via env_file at runtime — never baked into the image) ─────
+.env
+.env.*
+!.env.example
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# ── SeleniumBase downloads — rebuilt at image-build time (see Dockerfile) ─────
+# The Dockerfile fetches and patches a fresh ChromeDriver that matches
+# whatever Chrome version gets installed during the build, so copying the
+# local binary into the image would only save a few seconds while making the
+# image's ChromeDriver version wrong if they diverge.
+downloaded_files/
+
+# ── Runtime data — mounted as bind volumes in docker-compose ──────────────────
+# Including these in the image layer would shadow the volume mount and make
+# the container silently write logs/sessions inside the image instead of to
+# the host, where the user can see them.
+logs/
+browser_sessions/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── IDE / editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS artifacts ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Docs and notebooks (not needed at runtime) ────────────────────────────────
+*.md
+!README.md
+*.ipynb
+*.docx
+BOOKING_FLOW_PLAN.md
+DEPLOYMENT.md
+
+# ── Test files ────────────────────────────────────────────────────────────────
+scraping.ipynb
+pyproject.toml
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.png
+*.jpg
+*.jpeg
+waitlist.json

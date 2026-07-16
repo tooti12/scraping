@@ -72,7 +72,9 @@ def _human_wait(seconds: int, reason: str = "") -> None:
             except Exception:
                 pass
             time.sleep(min(15, remaining))
-    except ImportError:
+    except Exception:
+        # ImportError if pyautogui not installed; Xlib.error.DisplayConnectionError
+        # on a headless server with no DISPLAY — fall back to a plain sleep.
         time.sleep(seconds)
 
 
@@ -89,7 +91,8 @@ def _keep_screen_awake() -> None:
             except Exception:
                 pass
             time.sleep(30)
-    except ImportError:
+    except Exception:
+        # No-op on headless servers — no display to keep awake.
         pass
 
 

@@ -114,7 +114,7 @@ BLOCK_COOLDOWN_SECONDS = 90 * 60
 
 # See module docstring — full parallelism is only safe where every Chrome
 # session gets its own real (virtual) display.
-MAX_CONCURRENT_COUNTRIES = len(COUNTRIES) if sys.platform.startswith("linux") else 1
+MAX_CONCURRENT_COUNTRIES = 1
 
 # Same rationale as the watchdog this replaced in dashboard/app.py: a wedged
 # Selenium call has no timeout of its own. Without this, one stuck country
