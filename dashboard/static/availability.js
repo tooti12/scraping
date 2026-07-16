@@ -224,20 +224,52 @@ function stopBotAndClose() {
   renderStartButton();
 }
 
+const _LOG_RULES = [
+  [/__enter__.*launching Chrome/i,                        () => "Launching Chrome browser..."],
+  [/Chrome launched successfully/i,                       () => "Browser is ready."],
+  [/Warming up session/i,                                 () => "Connecting to VFS..."],
+  [/Opening VFS login page for country=(\w+)/i,          (m) => `Opening VFS login page for ${m[1].toUpperCase()}...`],
+  [/Login page loaded/i,                                  () => "Login page loaded."],
+  [/Handling cookie banner/i,                             () => "Accepting cookies..."],
+  [/Typing credentials/i,                                 () => "Entering login credentials..."],
+  [/Submitting login/i,                                   () => "Submitting credentials..."],
+  [/Clicking login button/i,                              () => "Clicking sign in..."],
+  [/Solving captcha/i,                                    () => "Solving CAPTCHA..."],
+  [/No captcha modal/i,                                   () => "No CAPTCHA required."],
+  [/Waiting for OTP prompt|fetching OTP from email/i,    () => "Checking email for verification code..."],
+  [/Waiting for OTP input field/i,                       () => "Waiting for verification field..."],
+  [/OTP.*enter|Submitting OTP|OTP submitted/i,           () => "Entering verification code..."],
+  [/session expired.*re-auth/i,                          () => "Session expired — logging in again..."],
+  [/login failed/i,                                      () => "Login attempt failed, will retry."],
+  [/check_slot_only|Checking.*slot|slot.*check/i,        () => "Checking appointment slots..."],
+];
+
+function _friendlyLine(raw) {
+  for (const [re, fn] of _LOG_RULES) {
+    const m = raw.match(re);
+    if (m) return fn(m);
+  }
+  return null;
+}
+
 function _openLogStream(logPane) {
   if (logEventSource) {
     logEventSource.close();
     logEventSource = null;
   }
+  let lastText = null;
   const es = new EventSource("/api/log-stream");
   logEventSource = es;
   es.onmessage = (e) => {
     try {
       const { line } = JSON.parse(e.data);
       if (!line || !line.trim()) return;
+      const friendly = _friendlyLine(line);
+      if (!friendly || friendly === lastText) return;
+      lastText = friendly;
       const el = document.createElement("div");
       el.className = "log-line";
-      el.textContent = line;
+      el.textContent = friendly;
       logPane.appendChild(el);
       logPane.scrollTop = logPane.scrollHeight;
     } catch (_) {}

@@ -842,37 +842,30 @@ a {
   height: 18px;
 }
 
-/* Live log pane inside the checking loader */
+/* Live status lines inside the checking loader */
 .log-pane {
   width: 100%;
-  max-width: 520px;
-  height: 180px;
+  max-width: 380px;
+  max-height: 140px;
   overflow-y: auto;
-  background: #0d0d0d;
-  border: 1px solid #2a2a2a;
-  border-radius: 6px;
-  padding: 10px 12px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.76rem;
-  line-height: 1.55;
-  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 2;
+  text-align: center;
   scroll-behavior: smooth;
 }
 
-@media (prefers-color-scheme: light) {
-  .log-pane {
-    background: #1a1a1a;
-  }
-}
-
 .log-line {
-  color: #b0c4b8;
-  white-space: pre-wrap;
-  word-break: break-all;
+  display: block;
+  color: var(--muted);
+  transition: color 0.2s;
 }
 
 .log-line:last-child {
-  color: #e0e0e0;
+  color: var(--text);
+  font-weight: 500;
 }
 
 /* Result state */
