@@ -302,6 +302,8 @@ class BrowserClient:
         chromium_args = [
             "--disable-software-rasterizer",
             "--disable-dev-shm-usage",
+            # Required when Chrome runs as root (e.g. on a Linux server).
+            "--no-sandbox",
         ]
 
         browser_params = {
