@@ -348,4 +348,11 @@ fetch("/api/bot-status")
   .finally(() => {
     statusPollTimer = setTimeout(pollStatusForever, POLL_BOT_STATUS_MS);
   });
+
+// Stop the bot whenever the user leaves this page (navigates away, closes
+// tab, etc.). sendBeacon is used because it fires reliably during unload
+// unlike fetch(), which the browser cancels mid-flight.
+window.addEventListener("pagehide", () => {
+  navigator.sendBeacon("/api/stop-bot");
+});
 })();
