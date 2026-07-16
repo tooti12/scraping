@@ -231,6 +231,39 @@ class AuthHandler:
         self.browser.solve_captcha()
         print("[AuthHandler] Typing OTP into field...")
         self.browser.sb.type("#mat-input-3", str(otp))
+
+        # The OTP submit button has its own invisible Turnstile — same fix as
+        # _submit_login: click the iframe then wait for the button to enable.
+        print("[AuthHandler] Clicking Turnstile iframe before OTP submit...")
+        try:
+            self.browser.sb.uc_gui_click_captcha()
+            print("[AuthHandler] Turnstile click sent.")
+        except Exception as e:
+            print(f"[AuthHandler] Turnstile click: {type(e).__name__}: {e}")
+
+        print("[AuthHandler] Waiting for OTP submit button to become enabled...")
+        otp_btn_enabled = False
+        for i in range(20):
+            try:
+                btn = self.browser.sb.driver.find_element("css selector", "button.mat-btn-lg")
+                disabled_attr = btn.get_attribute("disabled")
+                otp_btn_enabled = btn.is_enabled() and not disabled_attr
+                print(f"[AuthHandler] OTP submit button — enabled={otp_btn_enabled} disabled_attr={disabled_attr!r} (t={i}s)")
+                if otp_btn_enabled:
+                    break
+                if i == 8:
+                    print("[AuthHandler] Still disabled — retrying Turnstile click...")
+                    try:
+                        self.browser.sb.uc_gui_click_captcha()
+                    except Exception as e:
+                        print(f"[AuthHandler] Turnstile retry: {type(e).__name__}: {e}")
+            except Exception as e:
+                print(f"[AuthHandler] Could not read OTP button state: {e}")
+            self.browser.sb.sleep(1)
+
+        if not otp_btn_enabled:
+            print("[AuthHandler] WARNING: OTP submit button still disabled after 20s — clicking anyway.")
+
         print("[AuthHandler] Clicking submit button...")
         self.browser.sb.driver.uc_click("button.mat-btn-lg")
         print("[AuthHandler] OTP submitted. Waiting 10s for session to establish...")

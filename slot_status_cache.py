@@ -404,15 +404,23 @@ def start() -> bool:
     explicitly clicks "Start Bot" on /availability (dashboard/app.py's
     /api/start-bot). Safe to call more than once (e.g. every click, or from
     more than one browser tab) — only the first call actually starts
-    anything. Returns True if this call is the one that started it; also
-    False (refused, not just "already running") if a previous stop() is
-    still tearing down its workers — see _loop_thread's comment."""
+    anything. Returns True if this call is the one that started it."""
     global _started, _first_cycle_done, _is_checking, _next_cycle_at, _login_lock, _result_queue, _loop_thread, _logs_queue
+
+    # stop() flips _started=False immediately so the UI re-enables "Start Bot",
+    # but the loop thread keeps running _stop_all_workers() for a few more
+    # seconds. Without this join, a quick re-click on Start silently returns
+    # False (thread still alive) and the bot never restarts.
+    with _started_lock:
+        old_thread = _loop_thread
+    if old_thread is not None and old_thread.is_alive():
+        old_thread.join(timeout=20)
+
     with _started_lock:
         if _started:
             return False
         if _loop_thread is not None and _loop_thread.is_alive():
-            return False
+            return False  # still alive after 20s timeout — genuinely stuck
         _started = True
         _is_checking = False
         _next_cycle_at = None
