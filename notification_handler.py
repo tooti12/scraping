@@ -8,7 +8,7 @@ from email.utils import parsedate_to_datetime
 
 import requests
 
-from config import EMAIL_CONFIG, GMAIL_CONFIG
+from config import EMAIL_CONFIG, GMAIL_CONFIG, WHATSAPP_CONFIG
 
 # Some VFS OTP emails (same sender/subject as the plain-text ones — VFS
 # appears to randomly serve either template) embed the OTP as a distorted,
@@ -121,12 +121,10 @@ def _extract_otp_from_captcha_image(image_bytes: bytes) -> str | None:
 
 class SMSNotifier:
     def __init__(self):
-
         self.url = "https://api.callmebot.com/whatsapp.php"
-
         self.payload = {
-            "phone": "447724267222",
-            "apikey": 1122425,
+            "phone": WHATSAPP_CONFIG["phone"],
+            "apikey": WHATSAPP_CONFIG["apikey"],
         }
 
     def send_sms(self, message):
@@ -214,7 +212,7 @@ class GmailOTPClient:
                                 continue
                             otp = self._extract_otp(msg)
                             if otp:
-                                print(f"[GmailOTPClient] OTP extracted successfully: {otp}")
+                                print("[GmailOTPClient] OTP extracted successfully.")  # value intentionally not logged
                                 return otp
                             else:
                                 print(f"[GmailOTPClient] No OTP pattern found in email id={eid.decode()}, trying next...")
@@ -280,7 +278,7 @@ class GmailOTPClient:
         if image_bytes:
             otp = _extract_otp_from_captcha_image(image_bytes)
             if otp:
-                print(f"[GmailOTPClient] OTP matched via image OCR: {otp}")
+                print("[GmailOTPClient] OTP matched via image OCR.")  # value intentionally not logged
                 return otp
 
         print("[GmailOTPClient] Could not extract OTP from this email.")

@@ -129,36 +129,36 @@ COUNTRY_CONFIG = {
 # from a static config — booking_flow.py fetches the live form's fields
 # and asks the dashboard for values on every booking instead.
 APPLICANT_CONFIG = {
-    "vfs@thesemantics.co": {
+    os.environ.get("VFS_EMAIL", ""): {
         "api": {
             "urn": "",
             "arn": "",
-            "firstName": "AHMAR",
+            "firstName": os.environ.get("APPLICANT_FIRST_NAME", ""),
             "employerFirstName": "",
             "middleName": "",
-            "lastName": "ALI",
+            "lastName": os.environ.get("APPLICANT_LAST_NAME", ""),
             "employerLastName": "",
             "salutation": "",
             "gender": 1,
             "nationalId": None,
             "VisaToken": None,
             "employerContactNumber": "",
-            "contactNumber": "07724267222",
+            "contactNumber": os.environ.get("APPLICANT_PHONE", ""),
             "dialCode": "44",
             "employerDialCode": "",
-            "passportNumber": "EK1812233",
+            "passportNumber": os.environ.get("APPLICANT_PASSPORT", ""),
             "confirmPassportNumber": None,
-            "passportExpirtyDate": "03/09/2031",
-            "dateOfBirth": "09/08/1995",
-            "emailId": "UMARJAVED56@GMAIL.COM",
+            "passportExpirtyDate": os.environ.get("APPLICANT_PASSPORT_EXPIRY", ""),
+            "dateOfBirth": os.environ.get("APPLICANT_DOB", ""),
+            "emailId": os.environ.get("APPLICANT_EMAIL", ""),
             "employerEmailId": "",
-            "nationalityCode": "PAK",
-            "state": "HERTS",
-            "city": "WGC",
+            "nationalityCode": os.environ.get("APPLICANT_NATIONALITY", "PAK"),
+            "state": os.environ.get("APPLICANT_STATE", ""),
+            "city": os.environ.get("APPLICANT_CITY", ""),
             "isEndorsedChild": False,
             "applicantType": 0,
-            "addressline1": "31",
-            "addressline2": "MERRIFIELD",
+            "addressline1": os.environ.get("APPLICANT_ADDRESS1", ""),
+            "addressline2": os.environ.get("APPLICANT_ADDRESS2", ""),
             "pincode": None,
             "referenceNumber": None,
             "vlnNumber": None,
@@ -190,9 +190,14 @@ APPLICANT_CONFIG = {
             "canDeleteVAF": False,
             "canDownloadVAF": False,
             "Retryleft": "",
-            "ipAddress": "83.106.89.122",
+            "ipAddress": os.environ.get("APPLICANT_IP", ""),
         },
     },
+}
+
+WHATSAPP_CONFIG = {
+    "phone": os.environ.get("WHATSAPP_PHONE", ""),
+    "apikey": os.environ.get("WHATSAPP_API_KEY", ""),
 }
 
 TWILIO_CONFIG = {

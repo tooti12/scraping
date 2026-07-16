@@ -210,7 +210,7 @@ class AuthHandler:
             print("[AuthHandler] Failed to retrieve OTP — cannot complete login.")
             return
 
-        print(f"[AuthHandler] OTP received: {otp}")
+        print("[AuthHandler] OTP received.")  # value intentionally not logged
         self._emit("verifying_otp")
         print("[AuthHandler] Solving captcha before OTP entry...")
         self.browser.solve_captcha()

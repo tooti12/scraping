@@ -11,7 +11,6 @@ class APIClient:
 
     def check_slot_availability(self):
         script = self._create_fetch_script()
-        print(script)
         return self.browser_client.sb.execute_async_script(script)
 
     def _create_fetch_script(self):

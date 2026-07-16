@@ -68,15 +68,20 @@ class FrontendBridge:
         with self._lock:
             return self._pending_prompt
 
+    # Prompt types whose payload contains sensitive data (card numbers, CVV)
+    # and must never be replayed to a late-joining SSE subscriber.
+    _SENSITIVE_PROMPT_TYPES = {"enter_card_details"}
+
     def subscribe(self):
         """New queue.Queue receiving every future broadcast; used by the SSE
         endpoint, one per connected browser tab. Replays the currently
-        pending prompt (if any) so a late-joining tab doesn't miss it."""
+        pending prompt (if any) so a late-joining tab doesn't miss it —
+        except for sensitive payment prompts, which are never replayed."""
         new_queue = queue.Queue()
         with self._lock:
             self._status_subscribers.append(new_queue)
         prompt = self.current_prompt()
-        if prompt:
+        if prompt and prompt.get("prompt_type") not in self._SENSITIVE_PROMPT_TYPES:
             new_queue.put({"type": "prompt", **prompt})
         return new_queue
 

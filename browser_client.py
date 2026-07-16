@@ -89,8 +89,7 @@ class LocalAuthProxy:
         self._server.listen(20)
         t = threading.Thread(target=self._accept_loop, daemon=True)
         t.start()
-        print(f"[LocalAuthProxy] Listening on 127.0.0.1:{self.local_port} → "
-              f"{self.remote_host}:{self.remote_port}")
+        print(f"[LocalAuthProxy] Listening on 127.0.0.1:{self.local_port}")
 
     def stop(self):
         if self._server:
