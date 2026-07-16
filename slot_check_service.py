@@ -224,10 +224,14 @@ def run_country_worker(country: str, command_queue, result_queue, login_lock=Non
         it and report a normal error instead of crashing the worker loop."""
         try:
             return authenticate()
-        except Exception as e:
-            print(f"[slot_check_service] {country}: login failed: {e}")
+        except BaseException as e:
+            import traceback
+            print(f"[slot_check_service] {country}: login failed ({type(e).__name__}): {e}")
+            traceback.print_exc()
             close_browser()
-            return {"status": "error", "message": "Could not log in to VFS right now."}
+            if isinstance(e, Exception):
+                return {"status": "error", "message": "Could not log in to VFS right now."}
+            raise
 
     def do_check() -> dict:
         """One check on the current session, re-authenticating exactly once

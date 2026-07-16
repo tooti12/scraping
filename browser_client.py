@@ -356,8 +356,14 @@ class BrowserClient:
         print("[BrowserClient] SB context created. Browser will launch on __enter__.")
 
     def __enter__(self):
+        import traceback
         print("[BrowserClient] __enter__ — launching Chrome...")
-        self.sb = self._sb_ctx.__enter__()
+        try:
+            self.sb = self._sb_ctx.__enter__()
+        except BaseException as e:
+            print(f"[BrowserClient] Chrome launch FAILED ({type(e).__name__}): {e}")
+            traceback.print_exc()
+            raise
         print("[BrowserClient] Chrome launched successfully.")
         return self
 
