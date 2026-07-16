@@ -299,7 +299,12 @@ class BrowserClient:
         print(f"[BrowserClient]   proxy     : {'enabled (local-forward)' if proxy else 'disabled'}")
 
         chromium_args = [
-            "--disable-software-rasterizer",
+            # Use SwiftShader software WebGL so Cloudflare sees a real WebGL
+            # renderer instead of nothing. --disable-software-rasterizer was
+            # previously here but it blocks the SwiftShader fallback entirely,
+            # leaving WebGL unavailable on servers — a strong bot signal.
+            "--use-gl=swiftshader",
+            "--ignore-gpu-blocklist",
             "--disable-dev-shm-usage",
             # Required when Chrome runs as root (e.g. on a Linux server).
             "--no-sandbox",
