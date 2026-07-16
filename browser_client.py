@@ -311,16 +311,11 @@ class BrowserClient:
             "incognito": True,
             "headless2": headless,
             "chromium_arg": ",".join(chromium_args),
-            # Each session gets its own isolated virtual display before
-            # Chrome launches (native SeleniumBase/sbvirtualdisplay support —
-            # no-ops automatically on non-Linux). Running several countries'
-            # sessions concurrently means several Chrome windows solving
-            # Cloudflare captchas at once, and uc_gui_click_captcha()'s click
-            # is an absolute OS-level screen coordinate with no window
-            # targeting — without separate displays, one session's click
-            # could land on another session's window.
-            "xvfb": True,
-            "xvfb_metrics": "1920,1080",
+            # On Linux servers DISPLAY is set externally (Xvfb started by the
+            # systemd ExecStartPre). On local Linux the real X display is used.
+            # xvfb=True told SeleniumBase to spawn its own per-session Xvfb,
+            # but its sbvirtualdisplay management fails on some Ubuntu 24.04
+            # server configurations — removed in favour of the pre-started Xvfb.
         }
 
         self._local_proxy: LocalAuthProxy | None = None
