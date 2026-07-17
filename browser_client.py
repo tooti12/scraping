@@ -627,7 +627,8 @@ class BrowserClient:
                 "or rate-limited the request, re-authentication is required."
             )
 
-        # Attempt 1: original mat-btn-lg selector with a generous timeout
+        # Attempt 1: CSS selectors — short timeout since JS text search is the
+        # reliable fallback and these selectors rarely match on VFS's dashboard.
         clicked = False
         for selector in [
             "button.mat-btn-lg",
@@ -639,7 +640,7 @@ class BrowserClient:
             "app-dashboard button",
         ]:
             try:
-                self.sb.wait_for_element(selector, timeout=5)
+                self.sb.wait_for_element(selector, timeout=2)
                 self._log(f"  'Start New Booking' found via: {selector}")
                 self.sb.driver.uc_click(selector)
                 clicked = True
