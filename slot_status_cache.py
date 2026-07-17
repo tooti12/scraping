@@ -129,7 +129,7 @@ MAX_CONCURRENT_COUNTRIES = 1
 # generously because check_slot_only() may now submit several sub-category
 # combinations (one captcha-solve + banner-wait each) for missions that
 # don't offer Tourism, not just one.
-CHECK_TIMEOUT_SECONDS = 900
+CHECK_TIMEOUT_SECONDS = 1200
 
 # Extra time the main loop gives a worker to actually respond after
 # CHECK_TIMEOUT_SECONDS before concluding the *process* itself (not just its

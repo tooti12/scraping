@@ -189,7 +189,7 @@ class EmailClient:
 class GmailOTPClient:
     """Reads the VFS OTP from a Gmail inbox using IMAP + App Password."""
 
-    def get_otp(self, email_address, max_wait=90, poll_interval=5, since: float | None = None):
+    def get_otp(self, email_address, max_wait=150, poll_interval=5, since: float | None = None):
         """Poll Gmail until a fresh OTP email from VFS arrives (up to max_wait
         seconds). `since`, if given (a time.time() value from right before
         this login attempt's OTP was requested), rejects any email older

@@ -213,10 +213,10 @@ class AuthHandler:
             pass
 
         print("[AuthHandler] Waiting for OTP input field to appear (#mat-input-3)...")
-        self.browser.sb.wait_for_element("#mat-input-3", timeout=80)
-        print("[AuthHandler] OTP field found. Sleeping 20s to let email arrive...")
+        self.browser.sb.wait_for_element("#mat-input-3", timeout=120)
+        print("[AuthHandler] OTP field found. Sleeping 25s to let email arrive...")
         self._emit("awaiting_otp")
-        self.browser.sb.sleep(20)
+        self.browser.sb.sleep(25)
 
         print("[AuthHandler] Fetching OTP from email inbox...")
         otp = otp_client.get_otp(email, since=requested_at) if is_gmail else otp_client.get_otp(email)
