@@ -123,7 +123,7 @@ function bindStartButton(btn) {
     renderedState = null;
     showChecking();
     fetch("/api/start-bot", { method: "POST" })
-      .then(() => pollUntilFirstCycle())
+      .then(() => pollUntilCheckingDone())
       .catch(() => {
         closeChecking();
         renderStartButton();
@@ -190,7 +190,15 @@ function pollStatusForever() {
   fetch("/api/bot-status")
     .then((r) => r.json())
     .then((data) => {
-      if (data.running && !data.first_cycle_done) return; // modal loader owns this phase
+      if (data.running && (data.checking || !data.first_cycle_done)) {
+        // Checking in progress (first cycle or a later one) — show overlay.
+        // If it's already open (this tab started the bot), leave it alone.
+        if (overlay.hidden) {
+          showChecking("Checking appointment availability...");
+          loaderPollTimer = setTimeout(pollUntilCheckingDone, POLL_BOT_STATUS_MS);
+        }
+        return;
+      }
       renderBotControl(data);
     })
     .catch(() => {})
@@ -291,7 +299,9 @@ function _openLogStream(logPane) {
   es.onerror = () => {};
 }
 
-function showChecking() {
+// initialText seeds the log pane for late-joining clients who missed the
+// earlier log stream — they see something immediately instead of blank.
+function showChecking(initialText) {
   overlay.hidden = false;
   overlay.dataset.lock = "true";
   resultBox.innerHTML = "";
@@ -309,6 +319,7 @@ function showChecking() {
 
   const logPane = document.createElement("div");
   logPane.className = "log-pane";
+  if (initialText) logPane.textContent = initialText;
 
   const stopBtn = document.createElement("button");
   stopBtn.className = "loader-stop";
@@ -327,26 +338,28 @@ function showChecking() {
   _openLogStream(logPane);
 }
 
-function pollUntilFirstCycle() {
+// Polls until checking stops and first-cycle data is available, then hands
+// off to pollStatusForever. Works for both the first cycle and any later
+// cycle a late-joining tab catches mid-check.
+function pollUntilCheckingDone() {
   fetch("/api/bot-status")
     .then((r) => r.json())
     .then((data) => {
       if (!data.running) {
-        // Stopped from elsewhere (another tab, or the backend exiting).
         closeChecking();
         renderStartButton();
         return;
       }
-      if (data.first_cycle_done) {
+      if (data.first_cycle_done && !data.checking) {
         closeChecking();
         refreshStatus();
         renderBotControl(data);
         return;
       }
-      loaderPollTimer = setTimeout(pollUntilFirstCycle, POLL_BOT_STATUS_MS);
+      loaderPollTimer = setTimeout(pollUntilCheckingDone, POLL_BOT_STATUS_MS);
     })
     .catch(() => {
-      loaderPollTimer = setTimeout(pollUntilFirstCycle, POLL_BOT_STATUS_MS);
+      loaderPollTimer = setTimeout(pollUntilCheckingDone, POLL_BOT_STATUS_MS);
     });
 }
 
@@ -355,9 +368,11 @@ function pollUntilFirstCycle() {
 fetch("/api/bot-status")
   .then((r) => r.json())
   .then((data) => {
-    if (data.running && !data.first_cycle_done) {
-      showChecking();
-      pollUntilFirstCycle();
+    if (data.running && (data.checking || !data.first_cycle_done)) {
+      // Bot is actively checking — show overlay. Seed the log pane with a
+      // generic message for late joiners who missed the earlier log stream.
+      showChecking(data.first_cycle_done ? "Checking appointment availability..." : null);
+      pollUntilCheckingDone();
     } else {
       renderBotControl(data);
     }
