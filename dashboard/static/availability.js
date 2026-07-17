@@ -225,23 +225,41 @@ function stopBotAndClose() {
 }
 
 const _LOG_RULES = [
-  [/__enter__.*launching Chrome/i,                        () => "Launching Chrome browser..."],
-  [/Chrome launched successfully/i,                       () => "Browser is ready."],
+  // Browser startup
+  [/__enter__.*launching Chrome/i,                        () => "Starting up..."],
+  [/Chrome launched successfully/i,                       () => "Starting up..."],
   [/Warming up session/i,                                 () => "Connecting to VFS..."],
-  [/Opening VFS login page for country=(\w+)/i,          (m) => `Opening VFS login page for ${m[1].toUpperCase()}...`],
-  [/Login page loaded/i,                                  () => "Login page loaded."],
-  [/Handling cookie banner/i,                             () => "Accepting cookies..."],
-  [/Typing credentials/i,                                 () => "Entering login credentials..."],
-  [/Submitting login/i,                                   () => "Submitting credentials..."],
-  [/Clicking login button/i,                              () => "Clicking sign in..."],
-  [/Solving captcha/i,                                    () => "Solving CAPTCHA..."],
-  [/No captcha modal/i,                                   () => "No CAPTCHA required."],
-  [/Waiting for OTP prompt|fetching OTP from email/i,    () => "Checking email for verification code..."],
-  [/Waiting for OTP input field/i,                       () => "Waiting for verification field..."],
-  [/OTP.*enter|Submitting OTP|OTP submitted/i,           () => "Entering verification code..."],
-  [/session expired.*re-auth/i,                          () => "Session expired — logging in again..."],
-  [/login failed/i,                                      () => "Login attempt failed, will retry."],
-  [/check_slot_only|Checking.*slot|slot.*check/i,        () => "Checking appointment slots..."],
+
+  // Login page
+  [/Opening VFS login page for country=(\w+)/i,          (m) => `Checking ${m[1].toUpperCase()} appointments...`],
+  [/Login page loaded/i,                                  () => "Loading sign-in page..."],
+  [/Handling cookie banner/i,                             () => "Loading sign-in page..."],
+  [/Typing credentials|Submitting login|Clicking login button/i, () => "Signing in..."],
+
+  // OTP / verification
+  [/Waiting for OTP prompt|fetching OTP from email/i,    () => "Waiting for verification code..."],
+  [/Waiting for OTP input field/i,                       () => "Waiting for verification code..."],
+  [/OTP received|Typing OTP|OTP.*enter|Submitting OTP|OTP submitted|Clicking.*submit|Turnstile.*OTP|OTP submit/i,
+                                                          () => "Verifying identity..."],
+
+  // Post-login / session
+  [/JWT obtained successfully/i,                          () => "Signed in. Checking availability..."],
+  [/JWT not found|login failed/i,                         () => "Sign-in issue — retrying..."],
+  [/session expired.*re-auth/i,                           () => "Session refreshing..."],
+
+  // Dashboard / slot check
+  [/Dashboard.*Start New Booking|Waiting for Angular|Dashboard rendered|Start New Booking found|Clicked via/i,
+                                                          () => "Checking appointment availability..."],
+  [/Form ready|application-detail|checking.*slot|slot.*check|check_slot_only/i,
+                                                          () => "Checking appointment availability..."],
+
+  // Results
+  [/No slots available|no appointment|unavailable/i,      () => "No appointments currently available."],
+  [/slot.*found|appointment.*found|available.*slot/i,     () => "Appointment slot found!"],
+
+  // Errors / retries
+  [/Could not find.*button|check failed|Retrying|retry/i, () => "Retrying..."],
+  [/IP.*block|blocked/i,                                  () => "Temporarily paused — will retry."],
 ];
 
 function _friendlyLine(raw) {
