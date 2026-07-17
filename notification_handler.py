@@ -77,12 +77,30 @@ def _extract_otp_from_captcha_image(image_bytes: bytes) -> str | None:
         return None
     try:
         img = Image.open(io.BytesIO(image_bytes))
+        print(f"[GmailOTPClient] OCR image size: {img.size[0]}x{img.size[1]}px")
         band = _green_otp_badge_band(img)
         if band is None:
-            print("[GmailOTPClient] Couldn't locate the green OTP badge in the image.")
+            print("[GmailOTPClient] Couldn't locate the green OTP badge — trying full-image OCR fallback.")
+            # No green badge found (different image variant) — just take the
+            # first clean 6-digit token from the full image.
+            scale = _OTP_IMAGE_OCR_SCALE
+            big = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
+            data = pytesseract.image_to_data(
+                big,
+                output_type=pytesseract.Output.DICT,
+                config="--psm 11 -c tessedit_char_whitelist=0123456789",
+            )
+            for i in range(len(data["text"])):
+                text = re.sub(r"\D", "", data["text"][i].strip())
+                if len(text) == 6:
+                    print("[GmailOTPClient] OCR fallback: found 6-digit token (no badge).")
+                    return text
+            print("[GmailOTPClient] OCR fallback found no 6-digit token either.")
             return None
+
         badge_top, badge_bottom = band
         badge_center = (badge_top + badge_bottom) / 2
+        print(f"[GmailOTPClient] Green OTP badge found: y={badge_top}-{badge_bottom} center={badge_center:.1f}px")
 
         scale = _OTP_IMAGE_OCR_SCALE
         big = img.resize((img.width * scale, img.height * scale), Image.LANCZOS)
@@ -92,21 +110,27 @@ def _extract_otp_from_captcha_image(image_bytes: bytes) -> str | None:
             config="--psm 11 -c tessedit_char_whitelist=0123456789",
         )
 
-        best_token, best_distance = None, None
+        candidates = []
         for i in range(len(data["text"])):
             text = data["text"][i].strip()
-            if len(text) < 6:  # decoys/noise OCR'd as short fragments
+            if len(text) < 6:
                 continue
             top = data["top"][i] / scale
             height = data["height"][i] / scale
             token_center = top + height / 2
             distance = abs(token_center - badge_center)
-            if best_distance is None or distance < best_distance:
-                best_distance, best_token = distance, text
+            candidates.append((distance, text, token_center))
 
-        if best_token is None:
+        if not candidates:
             print("[GmailOTPClient] OCR found no 6+ digit token near the OTP badge.")
             return None
+
+        candidates.sort(key=lambda x: x[0])
+        print(f"[GmailOTPClient] OCR candidates (distance, center_y): "
+              f"{[(round(d,1), round(c,1)) for d, _, c in candidates[:5]]}")
+
+        best_distance, best_token, _ = candidates[0]
+        print(f"[GmailOTPClient] Best token distance={best_distance:.1f}px from badge center.")
 
         # The real OTP is always exactly 6 digits; OCR occasionally fuses a
         # neighboring decoy's leading/trailing digit onto the real one when
