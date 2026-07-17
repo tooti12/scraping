@@ -574,8 +574,24 @@ class BrowserClient:
         self._log(f"Dashboard → Start New Booking  ({dashboard_url})")
         self.sb.open(dashboard_url)
 
-        # Angular SPAs need extra time to bootstrap and render the dashboard components.
-        self.sb.sleep(5)
+        # Angular SPAs need extra time to bootstrap and render dashboard components,
+        # especially on server (SwiftShader software rendering is slower than a real GPU).
+        # Poll until the page has rendered at least one button/link — up to 30s.
+        self._log("  Waiting for Angular dashboard to render...")
+        for _i in range(30):
+            self.sb.sleep(1)
+            try:
+                count = self.sb.execute_script(
+                    "return document.querySelectorAll('button, a').length;"
+                )
+                if count and count > 0:
+                    self._log(f"  Dashboard rendered ({count} elements) after {_i + 1}s.")
+                    break
+            except Exception:
+                pass
+        else:
+            self._log("  WARNING: dashboard still empty after 30s — proceeding anyway.")
+
         current_url = self.sb.get_current_url()
         page_title = self.sb.get_title()
         self._log(f"  Page title: {page_title}")
