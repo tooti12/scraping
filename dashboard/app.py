@@ -132,7 +132,7 @@ def create_app(bridge):
     return app
 
 
-def run_dashboard(bridge, host="127.0.0.1", port=5050):
+def run_dashboard(bridge, host="0.0.0.0", port=5050):
     app = create_app(bridge)
     # Single-user local tool: silence werkzeug's per-request access log so
     # the /api/answer body (which carries card details during payment)
