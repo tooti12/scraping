@@ -29,15 +29,34 @@ internet-facing.
 """
 import json
 import logging
+import secrets
+from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request
 
 import slot_status_cache
 from config import COUNTRIES
+from models import init_db
+from dashboard.auth import auth_bp
+from dashboard.admin_routes import admin_panel_bp
+
+
+def _load_or_create_secret() -> bytes:
+    key_file = Path(__file__).parent.parent / ".flask_secret"
+    if key_file.exists():
+        return key_file.read_bytes()
+    key = secrets.token_bytes(32)
+    key_file.write_bytes(key)
+    key_file.chmod(0o600)
+    return key
 
 
 def create_app(bridge):
+    init_db()
     app = Flask(__name__)
+    app.secret_key = _load_or_create_secret()
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(admin_panel_bp)
     app.config["bridge"] = bridge
 
     @app.route("/")
@@ -68,18 +87,6 @@ def create_app(bridge):
                 "next_check_in_seconds": cycle["next_check_in_seconds"],
             }
         )
-
-    @app.route("/api/start-bot", methods=["POST"])
-    def api_start_bot():
-        slot_status_cache.start()
-        # Not hardcoded True: start() can refuse (e.g. a previous stop() is
-        # still tearing down its workers), so report what's actually running.
-        return jsonify({"running": slot_status_cache.is_running()})
-
-    @app.route("/api/stop-bot", methods=["POST"])
-    def api_stop_bot():
-        slot_status_cache.stop()
-        return jsonify({"running": False})
 
     @app.route("/booking")
     def booking():

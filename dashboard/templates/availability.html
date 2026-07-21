@@ -29,26 +29,15 @@
 
   <header class="hero">
     <div class="hero-copy">
-      {% if bot_running %}
-      <span class="eyebrow"><span class="live-dot"></span> Bot is running, auto-checked against VFS Global every few minutes</span>
-      {% else %}
-      <span class="eyebrow">Bot is not running yet</span>
-      {% endif %}
+      <span class="eyebrow" id="bot-eyebrow" {% if not bot_running %}hidden{% endif %}>
+        <span class="live-dot"></span>
+        <span id="bot-eyebrow-text">Bot is monitoring in background</span>
+      </span>
       <h1>Current appointment <span class="grad">availability</span></h1>
       <p>
-        London centre, Tourism category. Once started, every destination below is re-checked
-        continuously in the background and this page always reflects the latest result.
+        London centre, Tourism category. Results are updated automatically by the monitoring bot
+        and this page always reflects the latest check.
       </p>
-      <div id="bot-control">
-        {% if bot_running %}
-          <div class="bot-status-wrap">
-            <button class="hero-cta hero-cta--busy" disabled>Start Bot</button>
-            <p class="bot-status-msg"><span class="bot-live-dot"></span>Bot is already running</p>
-          </div>
-        {% else %}
-          <button id="start-bot-btn" class="hero-cta">Start Bot</button>
-        {% endif %}
-      </div>
     </div>
   </header>
 

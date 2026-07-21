@@ -364,9 +364,30 @@ def _run_loop():
         with _started_lock:
             _is_checking = True
             _next_cycle_at = None
+
+        cycle_id = None
+        try:
+            from models import start_cycle as _start_cycle
+            cycle_id = _start_cycle()
+        except Exception as e:
+            print(f"[slot_status_cache] DB: failed to record cycle start: {e}")
+
         _run_one_cycle()
+
         with _started_lock:
             _is_checking = False
+
+        if cycle_id is not None:
+            try:
+                from models import end_cycle as _end_cycle
+                _end_cycle(
+                    cycle_id,
+                    get_all_status(),
+                    "stopped" if _stop_event.is_set() else "completed",
+                )
+            except Exception as e:
+                print(f"[slot_status_cache] DB: failed to record cycle end: {e}")
+
         if _stop_event.is_set():
             # Stopped mid-cycle — not every country actually got checked,
             # so this pass doesn't count toward first_cycle_done.
