@@ -41,7 +41,10 @@
       </p>
       <div id="bot-control">
         {% if bot_running %}
-          <span id="bot-status-text" class="hero-cta hero-cta--running">Bot is running</span>
+          <div class="bot-status-wrap">
+            <button class="hero-cta hero-cta--busy" disabled>Start Bot</button>
+            <p class="bot-status-msg"><span class="bot-live-dot"></span>Bot is already running</p>
+          </div>
         {% else %}
           <button id="start-bot-btn" class="hero-cta">Start Bot</button>
         {% endif %}

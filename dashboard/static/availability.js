@@ -143,12 +143,16 @@ function renderChecking() {
   if (!control || renderedState === "checking") return;
   renderedState = "checking";
   clearCountdown();
-  control.innerHTML = '<span class="hero-cta hero-cta--running">Checking all countries…</span>';
+  control.innerHTML =
+    '<div class="bot-status-wrap">' +
+    '<button class="hero-cta hero-cta--busy" disabled>Start Bot</button>' +
+    '<p class="bot-status-msg"><span class="bot-live-dot"></span>Bot is running — checking all countries now</p>' +
+    '</div>';
 }
 
 function updateCountdownText() {
   const el = document.getElementById("rest-countdown");
-  if (el) el.textContent = `Bot will start in ${countdownRemaining}s`;
+  if (el) el.textContent = `${countdownRemaining}s`;
 }
 
 // next_check_in_seconds comes straight from slot_status_cache's
@@ -162,10 +166,10 @@ function renderResting(seconds) {
     renderedState = "resting";
     clearCountdown();
     control.innerHTML =
-      '<div class="bot-resting">' +
-      '<span class="hero-cta hero-cta--resting">Restarting</span>' +
-      '<p class="bot-resting-timer" id="rest-countdown"></p>' +
-      "</div>";
+      '<div class="bot-status-wrap">' +
+      '<button class="hero-cta hero-cta--busy" disabled>Start Bot</button>' +
+      '<p class="bot-status-msg"><span class="bot-live-dot"></span>Bot is active — next check in <strong id="rest-countdown"></strong></p>' +
+      '</div>';
     countdownTimer = setInterval(() => {
       countdownRemaining = Math.max(0, countdownRemaining - 1);
       updateCountdownText();

@@ -247,42 +247,43 @@ a {
   transform: none;
 }
 
-.hero-cta--running {
-  background: var(--success);
+/* Bot running — shown to all users worldwide when the bot is in use.
+   The button stays visible so it reads as "this exists but is taken". */
+.hero-cta--busy {
+  opacity: 0.45;
+  cursor: not-allowed;
   box-shadow: none;
-  cursor: default;
 }
 
-.hero-cta--running:hover {
-  background: var(--success);
+.hero-cta--busy:hover {
+  background: var(--accent);
   transform: none;
 }
 
-/* Between cycles — distinct from the green "actively checking" pill so the
-   two states read differently at a glance, not just by their text. */
-.hero-cta--resting {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  box-shadow: none;
-  cursor: default;
-}
-
-.hero-cta--resting:hover {
-  background: var(--accent-soft);
-  transform: none;
-}
-
-.bot-resting {
+.bot-status-wrap {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.65rem;
 }
 
-.bot-resting-timer {
+.bot-status-msg {
   margin: 0;
   font-size: 0.85rem;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.bot-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: live-pulse 2s infinite;
+  flex-shrink: 0;
 }
 
 .hero-cta svg {
