@@ -76,17 +76,21 @@ slate. Every page load and /api/status poll just reads the resulting
 cache, and visitor traffic can never block or be blocked by it. See
 DEPLOYMENT.md.
 """
+import json
 import multiprocessing as mp
 import random
 import sys
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from queue import Empty
 from queue import Queue as ThreadQueue
 
 from config import COUNTRIES
 from slot_check_service import run_country_worker
+
+_PERSIST_FILE = Path(__file__).parent / "slot_results.json"
 
 # One full pass over all countries, then wait a random amount of time in
 # this range before the next pass. A range instead of one fixed number so
@@ -203,6 +207,30 @@ def get_all_status() -> dict:
         return {code: dict(data) for code, data in _status.items()}
 
 
+def _save_results() -> None:
+    """Write current slot results to disk so they survive server restarts."""
+    try:
+        with _lock:
+            snapshot = {k: dict(v) for k, v in _status.items()}
+        with open(_PERSIST_FILE, "w") as f:
+            json.dump(snapshot, f)
+    except Exception as e:
+        print(f"[slot_status_cache] Failed to save results to disk: {e}")
+
+
+def _load_results() -> None:
+    """Restore slot results from disk on startup (if the file exists)."""
+    try:
+        if _PERSIST_FILE.exists():
+            with open(_PERSIST_FILE) as f:
+                data = json.load(f)
+            with _lock:
+                _status.update(data)
+            print(f"[slot_status_cache] Loaded persisted results for {len(data)} country(ies) from disk.")
+    except Exception as e:
+        print(f"[slot_status_cache] Failed to load persisted results: {e}")
+
+
 def _spawn_worker(code: str) -> None:
     command_queue = mp.Queue()
     p = mp.Process(
@@ -274,6 +302,7 @@ def _run_one_cycle() -> None:
                 "message": f"Paused after a VFS block — retrying in ~{remaining_min} min.",
                 "checked_at": datetime.now(timezone.utc).isoformat(),
             }
+        _save_results()
 
     busy: dict = {}  # country code -> time.monotonic() when "check" was sent
 
@@ -302,6 +331,7 @@ def _run_one_cycle() -> None:
                 _blocked_until[code] = time.time() + BLOCK_COOLDOWN_SECONDS
             with _lock:
                 _status[code] = {**result, "checked_at": datetime.now(timezone.utc).isoformat()}
+            _save_results()
             busy.pop(code, None)
             # A stop request stops new countries from starting, but never
             # force-quits a check already in flight — those finish (or hit
@@ -323,6 +353,7 @@ def _run_one_cycle() -> None:
                     "message": "Check process became unresponsive and was stopped.",
                     "checked_at": datetime.now(timezone.utc).isoformat(),
                 }
+            _save_results()
             busy.pop(stuck_code, None)
             command_next()
 
@@ -447,3 +478,9 @@ def stop() -> None:
     _stop_event.set()
     with _started_lock:
         _started = False
+
+
+# Restore any results persisted from a previous run so slot data survives
+# server restarts — users see the last known state immediately on page load
+# rather than a blank slate until the bot has finished a full cycle.
+_load_results()
