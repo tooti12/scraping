@@ -425,19 +425,47 @@ class BrowserClient:
         home_url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/"
         print(f"[BrowserClient] Warming up session via home page: {home_url}")
         self.sb.open(home_url)
-        self.sb.sleep(3)
+        self.sb.sleep(5)
+        # Pass any Cloudflare JS challenge on the home page before navigating
+        # to /login — the challenge fires on first contact with the domain.
+        try:
+            self.sb.uc_gui_click_captcha()
+            self.sb.sleep(5)
+        except Exception:
+            pass
         self._log_state("After opening home page")
 
         url = f"https://visa.vfsglobal.com/gbr/en/{self.country}/login"
         print(f"[BrowserClient] Opening login page: {url}")
         self.sb.open(url)
         self.sb.sleep(5)
-        try:
-            self.sb.wait_for_element("#email", timeout=15)
-            print("[BrowserClient] Login form ready (#email found).")
-        except Exception:
-            print("[BrowserClient] #email not found after 15s — sleeping 10s more...")
-            self.sb.sleep(10)
+
+        # Wait for Angular to bootstrap (#email). The page title stays as just
+        # the bare domain ('visa.vfsglobal.com') while a Cloudflare JS challenge
+        # is pending — try uc_gui_click_captcha() up to 3 times to pass it.
+        email_found = False
+        for attempt in range(1, 4):
+            try:
+                self.sb.wait_for_element("#email", timeout=15)
+                email_found = True
+                print("[BrowserClient] Login form ready (#email found).")
+                break
+            except Exception:
+                try:
+                    title = self.sb.get_title()
+                except Exception:
+                    title = ""
+                print(f"[BrowserClient] #email not found (attempt {attempt}/3) — title={title!r}, trying uc_gui_click_captcha...")
+                try:
+                    self.sb.uc_gui_click_captcha()
+                    self.sb.sleep(8)
+                except Exception as e:
+                    print(f"[BrowserClient] uc_gui_click_captcha: {type(e).__name__}: {e}")
+                    self.sb.sleep(5)
+
+        if not email_found:
+            print("[BrowserClient] WARNING: #email never appeared — Cloudflare is likely blocking this session.")
+
         self._log_state("After opening login page")
         print("[BrowserClient] Login page loaded.")
 
@@ -510,10 +538,7 @@ class BrowserClient:
             print("[BrowserClient] No IP block via heading:", e)
 
         # Some block variants land on .../page-not-found with the message
-        # only in <title>, no visible h1 at all (seen for real: Denmark's
-        # session landed here after submitting credentials and the heading
-        # check above missed it, so the run just timed out 50s later
-        # waiting for an OTP field that was never going to appear).
+        # only in <title>, no visible h1 at all.
         try:
             title = self.sb.get_title()
             if "unable to progress" in title.lower():
@@ -521,6 +546,21 @@ class BrowserClient:
                 return True
         except Exception as e:
             print("[BrowserClient] No IP block via title:", e)
+
+        # Cloudflare JS challenge: the page title stays as the bare domain
+        # ('visa.vfsglobal.com') while the challenge is pending. Angular never
+        # boots when CF blocks the session, so no VFS element ever appears.
+        # Treat this as a block so the cooldown timer fires instead of the
+        # session wasting the whole CHECK_TIMEOUT waiting for elements.
+        try:
+            title = self.sb.get_title()
+            url = self.sb.get_current_url()
+            if title in ("visa.vfsglobal.com", "") and "visa.vfsglobal.com" in url:
+                print(f"[BrowserClient] Cloudflare challenge page detected (title={title!r}) — treating as block.")
+                return True
+        except Exception as e:
+            print("[BrowserClient] Could not check CF challenge state:", e)
+
         return False
 
     def get_auth_token(self):
