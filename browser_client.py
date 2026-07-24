@@ -151,10 +151,18 @@ class LocalAuthProxy:
             if first_line.upper().startswith("CONNECT"):
                 out = "\r\n".join([first_line] + kept) + "\r\n\r\n"
                 remote.sendall(out.encode())
-                # Wait for upstream 200 Connection established
+                # Wait for upstream response
                 resp = b""
                 while b"\r\n\r\n" not in resp:
-                    resp += remote.recv(4096)
+                    chunk = remote.recv(4096)
+                    if not chunk:
+                        break
+                    resp += chunk
+                status_line = resp.split(b"\r\n")[0].decode("utf-8", errors="ignore")
+                if " 200 " not in status_line:
+                    print(f"[LocalAuthProxy] CONNECT rejected by upstream: {status_line!r}")
+                    client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                    return
                 client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
                 threading.Thread(
                     target=self._relay, args=(remote, client), daemon=True
