@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Login — VFS Slot Checker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235b8cff'/%3E%3Cpath d='M12 6v6l4 2' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/home.css">
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body class="admin-login-body">
+  <div class="login-wrap">
+    <div class="login-card">
+
+      <div class="login-brand">
+        <span class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12.5l3.2 3.2L17 9"/></svg>
+        </span>
+        <span>VFS Admin</span>
+      </div>
+
+      <h1 class="login-title">Sign in</h1>
+      <p class="login-sub">Admin access only &middot; No public registration</p>
+
+      {% if error %}
+      <div class="alert-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" class="login-form">
+        <div class="field-group">
+          <label class="field-label" for="username">Username</label>
+          <input class="field-input" id="username" type="text" name="username"
+                 autocomplete="username" autofocus required>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="password">Password</label>
+          <input class="field-input" id="password" type="password" name="password"
+                 autocomplete="current-password" required>
+        </div>
+        <button class="btn-primary btn-full" type="submit">Sign in</button>
+      </form>
+
+      <p class="login-back">
+        <a href="/">&#8592; Back to site</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

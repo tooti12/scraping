@@ -1,0 +1,45 @@
+services:
+  vfs-scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vfs-scraper:latest
+    container_name: vfs-scraper
+    restart: unless-stopped
+
+    # Credentials and proxy — never baked into the image.
+    # Copy .env.example → .env and fill in your values before starting.
+    env_file: .env
+
+    ports:
+      # Flask dashboard: http://localhost:5050
+      - "5050:5050"
+
+    volumes:
+      # Persist run logs across container restarts / upgrades
+      - ./logs:/app/logs
+      # Persist Chrome browser sessions (cookies, sessionStorage) across
+      # restarts so workers don't have to do a full login on every start
+      - ./browser_sessions:/app/browser_sessions
+
+    # Chrome allocates large shared-memory segments for its renderer
+    # processes. Docker's default /dev/shm is 64 MB, which causes random
+    # "Aw, Snap!" crashes on JS-heavy pages like VFS. 2 GB is more than
+    # enough for four concurrent Chrome sessions (4 countries × ~200 MB each).
+    shm_size: "2gb"
+
+    # Give running Selenium/Chrome processes time to shut down cleanly
+    # before Docker force-kills the container.
+    stop_grace_period: 30s
+
+    # Pass --monitor to open browsers immediately and run the continuous
+    # booking monitor instead of the dashboard-only default mode.
+    # Uncomment the line below to enable it:
+    # command: ["python", "main.py", "--monitor"]
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

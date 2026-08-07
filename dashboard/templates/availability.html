@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Current Availability: VFS Slot Checker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235b8cff'/%3E%3Cpath d='M7 12.5l3.2 3.2L17 9' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/home.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12.5l3.2 3.2L17 9"/></svg>
+      </span>
+      VFS Slot Checker
+    </a>
+    <div class="nav-links">
+      <a href="/">Home</a>
+      <a class="nav-cta js-coming-soon" href="/booking">
+        Booking Console
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-copy">
+      <span class="eyebrow" id="bot-eyebrow" {% if not bot_running %}hidden{% endif %}>
+        <span class="live-dot"></span>
+        <span id="bot-eyebrow-text">Bot is monitoring in background</span>
+      </span>
+      <h1>Current appointment <span class="grad">availability</span></h1>
+      <p>
+        London centre, Tourism category. Results are updated automatically by the monitoring bot
+        and this page always reflects the latest check.
+      </p>
+    </div>
+  </header>
+
+  <main class="section" id="availability">
+    {% set flag_svgs = {
+      "dnk": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#c8102e"/><rect x="10" width="4" height="20" fill="#fff"/><rect y="8" width="30" height="4" fill="#fff"/></svg>',
+      "bgr": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#00966e"/><rect y="13.33" width="30" height="6.67" fill="#d62612"/></svg>',
+      "svn": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#005ce6"/><rect y="13.33" width="30" height="6.67" fill="#d52b1e"/><g transform="translate(4,3)"><path d="M0 6.5 L4 1 L8 6.5 Z" fill="#005ce6" stroke="#fff" stroke-width="0.4"/><circle cx="2" cy="1" r="0.7" fill="#ffd700"/><circle cx="4.5" cy="-0.3" r="0.7" fill="#ffd700"/><circle cx="6.4" cy="1.4" r="0.7" fill="#ffd700"/></g></svg>',
+      "che": '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#d52b1e"/><rect x="13" y="4" width="4" height="12" fill="#fff"/><rect x="7" y="8" width="16" height="4" fill="#fff"/></svg>',
+    } %}
+    {% set default_flag = '<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#232838"/><circle cx="15" cy="10" r="6" fill="none" stroke="#5b6376" stroke-width="1"/></svg>' %}
+    <div class="country-grid">
+      {% for c in countries %}
+      {% set s = status.get(c.code) %}
+      <div class="country-card" data-country="{{ c.code }}">
+        <div class="country-head">
+          <span class="country-flag">{{ flag_svgs.get(c.code, default_flag)|safe }}</span>
+          <span class="country-code">{{ c.code|upper }}</span>
+        </div>
+        <span class="country-name">{{ c.name }}</span>
+        <div class="country-status">
+          {% if not s %}
+          {% elif s.combos %}
+            {% for c in s.combos %}
+            <div class="combo-row">
+              <span class="combo-label">{{ c.sub_cat }}:</span>
+              {% if c.status == 'slots_available' %}
+                <span class="status-badge status-success">Slot available</span>
+              {% elif c.status == 'no_slots' %}
+                <span class="status-badge status-empty">No slots</span>
+              {% else %}
+                <span class="status-badge status-error">Check failed</span>
+              {% endif %}
+            </div>
+            {% if c.slot_details %}<p class="status-detail">{{ c.slot_details }}</p>{% endif %}
+            {% endfor %}
+            <p class="status-time"></p>
+          {% else %}
+            <span class="status-badge status-error">Check failed</span>
+            <p class="status-detail">{{ s.message or "Will retry on the next pass." }}</p>
+            <p class="status-time"></p>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span>VFS Slot Checker: not affiliated with VFS Global.</span>
+    <a class="footer-link" href="https://thesemantics.co" target="_blank" rel="noopener">Built by The Semantics</a>
+  </footer>
+
+  <div class="result-overlay" id="result-overlay" hidden>
+    <div class="result-box" id="result-box"></div>
+  </div>
+
+  <script src="/static/coming-soon.js"></script>
+  <script src="/static/availability.js"></script>
+</body>
+</html>

@@ -1,4 +1,6 @@
 seleniumbase==4.38.2
+flask>=3.0.0
+python-dotenv>=1.0.1
 certifi>=2025.4.26
 attrs>=25.3.0
 chardet==5.2.0
@@ -13,3 +15,6 @@ requests==2.32.3
 six>=1.17.0
 urllib3>=1.26.20,<2.5.0
 twilio==9.6.1
+pyautogui>=0.9.54
+pytesseract>=0.3.13
+Pillow>=12.2.0

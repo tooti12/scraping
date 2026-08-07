@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Panel — VFS Slot Checker</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235b8cff'/%3E%3Cpath d='M12 6v6l4 2' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/home.css">
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body class="admin-body">
+
+  <!-- Top nav -->
+  <nav class="admin-nav">
+    <a class="admin-brand" href="/admin">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12.5l3.2 3.2L17 9"/></svg>
+      </span>
+      VFS Admin
+    </a>
+    <div class="admin-nav-right">
+      <a class="admin-nav-link" href="/availability" target="_blank">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Availability page
+      </a>
+      <span class="admin-user">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        {{ admin_username }}
+      </span>
+      <a class="btn-ghost" href="/admin/logout">Logout</a>
+    </div>
+  </nav>
+
+  <main class="admin-main">
+
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-sub">Monitor and control the VFS slot-checking bot.</p>
+      </div>
+      <div id="live-indicator" class="live-indicator {% if running %}live-indicator--on{% endif %}">
+        <span class="live-dot"></span>
+        <span id="live-text">{% if running %}Bot is running{% else %}Bot is stopped{% endif %}</span>
+      </div>
+    </div>
+
+    <!-- Stats row -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <p class="stat-label">Status</p>
+        <p class="stat-value" id="stat-status">
+          {% if running %}
+            <span class="run-badge run-running">Running</span>
+          {% else %}
+            <span class="run-badge run-stopped">Stopped</span>
+          {% endif %}
+        </p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Total Cycles Recorded</p>
+        <p class="stat-value">{{ total_cycles }}</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Countries Monitored</p>
+        <p class="stat-value">{{ countries | length }}</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Last Cycle Started</p>
+        <p class="stat-value stat-value--sm">
+          {% if cycles %}{{ cycles[0].started_at_fmt }}{% else %}Never{% endif %}
+        </p>
+      </div>
+    </div>
+
+    <!-- Bot control + current results -->
+    <div class="control-row">
+
+      <!-- Bot control -->
+      <div class="admin-card">
+        <h2 class="card-title">Bot Control</h2>
+        <div id="bot-control-wrap">
+          {% if running %}
+          <div class="bot-state-indicator">
+            <span class="live-dot"></span>
+            <span>
+              Bot is currently
+              <strong>{% if checking %}checking all countries{% else %}resting — next check in {{ next_check_in or '…' }}s{% endif %}</strong>
+            </span>
+          </div>
+          <p class="muted" style="margin:0 0 1.2rem; font-size:0.85rem;">
+            Stop the bot to pause all checks. Slot data already collected will remain visible on the availability page.
+          </p>
+          <form method="POST" action="/admin/stop-bot">
+            <button class="btn-danger" type="submit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              Stop Bot
+            </button>
+          </form>
+          {% else %}
+          <p class="muted" style="margin:0 0 1.2rem; font-size:0.85rem;">
+            Bot is not running. Start it to begin checking VFS appointment slots for all countries. Checks repeat automatically every few minutes.
+          </p>
+          <form method="POST" action="/admin/start-bot">
+            <button class="btn-primary" type="submit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Start Bot
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Current slot results -->
+      <div class="admin-card">
+        <h2 class="card-title">Current Slot Status</h2>
+        {% if status %}
+        <div class="results-mini-grid">
+          {% for c in countries %}
+          {% set s = status.get(c.code) %}
+          <div class="result-mini">
+            <span class="result-mini-flag">
+              {% if c.code == 'dnk' %}<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#c8102e"/><rect x="10" width="4" height="20" fill="#fff"/><rect y="8" width="30" height="4" fill="#fff"/></svg>
+              {% elif c.code == 'bgr' %}<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#00966e"/><rect y="13.33" width="30" height="6.67" fill="#d62612"/></svg>
+              {% elif c.code == 'svn' %}<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect y="6.67" width="30" height="6.67" fill="#005ce6"/><rect y="13.33" width="30" height="6.67" fill="#d52b1e"/></svg>
+              {% elif c.code == 'che' %}<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#d52b1e"/><rect x="13" y="4" width="4" height="12" fill="#fff"/><rect x="7" y="8" width="16" height="4" fill="#fff"/></svg>
+              {% else %}<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#232838"/></svg>{% endif %}
+            </span>
+            <span class="result-mini-name">{{ c.name }}</span>
+            {% if s %}
+              {% if s.combos %}
+                {% set slot = namespace(found=false) %}
+                {% for combo in s.combos %}{% if combo.status == 'slots_available' %}{% set slot.found = true %}{% endif %}{% endfor %}
+                {% if slot.found %}
+                  <span class="status-badge status-success">Slot available</span>
+                {% else %}
+                  <span class="status-badge status-empty">No slots</span>
+                {% endif %}
+              {% else %}
+                <span class="status-badge status-error">Check failed</span>
+              {% endif %}
+            {% else %}
+              <span class="status-badge status-empty">Pending</span>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted empty-msg">No results yet. Start the bot to check availability.</p>
+        {% endif %}
+        <a class="view-link" href="/availability" target="_blank">
+          View full availability page
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </div>
+
+    </div>
+
+    <!-- Run history -->
+    <div class="admin-card">
+      <div class="card-header-row">
+        <h2 class="card-title">Bot Run History</h2>
+        <span class="muted" style="font-size:0.82rem;">{{ total_cycles }} cycle{{ 's' if total_cycles != 1 else '' }} recorded</span>
+      </div>
+
+      {% if cycles %}
+      <div class="table-wrap">
+        <table class="run-table">
+          <thead>
+            <tr>
+              <th class="th-id">#</th>
+              <th>Started</th>
+              <th>Ended</th>
+              <th>Duration</th>
+              <th>Status</th>
+              <th>Summary</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cycle in cycles %}
+            <tr>
+              <td class="td-id">{{ cycle.id }}</td>
+              <td class="td-time">{{ cycle.started_at_fmt or '—' }}</td>
+              <td class="td-time">{{ cycle.ended_at_fmt or ('In progress…' if cycle.status == 'running' else '—') }}</td>
+              <td class="td-dur">{{ cycle.duration_fmt }}</td>
+              <td>
+                {% if cycle.status == 'running' %}
+                  <span class="run-badge run-running">Running</span>
+                {% elif cycle.status == 'completed' %}
+                  <span class="run-badge run-completed">Completed</span>
+                {% else %}
+                  <span class="run-badge run-stopped">Stopped</span>
+                {% endif %}
+              </td>
+              <td class="td-summary">{{ cycle.summary }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted empty-msg">No cycles recorded yet. Start the bot to begin.</p>
+      {% endif %}
+    </div>
+
+  </main>
+
+  <script>
+    // Auto-reload every 30s so live cycle data stays fresh without manual refresh
+    let _reloadTimer = setTimeout(() => location.reload(), 30000);
+    // Reset timer on any user interaction so a deliberate scroll/click doesn't interrupt
+    document.addEventListener("click", () => { clearTimeout(_reloadTimer); _reloadTimer = setTimeout(() => location.reload(), 30000); });
+  </script>
+</body>
+</html>
