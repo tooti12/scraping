@@ -347,7 +347,13 @@ class BrowserClient:
             self._local_proxy = LocalAuthProxy(
                 remote_host, int(remote_port), username, password
             )
-            self._local_proxy.start()
+            try:
+                self._local_proxy.start()
+            except BaseException:
+                # A half-bound listener still holds its socket; drop it rather
+                # than leaving it stranded on an object that never returns.
+                self._release_proxy()
+                raise
             browser_params["proxy"] = f"127.0.0.1:{self._local_proxy.local_port}"
         else:
             print("[BrowserClient] No proxy — connecting directly.")
@@ -364,8 +370,26 @@ class BrowserClient:
                 print(f"[BrowserClient]   {k} = {v}")
 
         print("[BrowserClient] Calling SB() to create browser context...")
-        self._sb_ctx = SB(**browser_params)
+        # The local proxy is already listening at this point, so anything that
+        # raises from here on would leak its socket and accept thread —
+        # __exit__ never runs for an object whose __init__ didn't return.
+        self._sb_ctx = None
+        self._entered = False
+        try:
+            self._sb_ctx = SB(**browser_params)
+        except BaseException:
+            self._release_proxy()
+            raise
         print("[BrowserClient] SB context created. Browser will launch on __enter__.")
+
+    def _release_proxy(self) -> None:
+        """Stops the local forwarding proxy if one is running. Idempotent, so
+        it's safe to call from both the failure paths and __exit__."""
+        if self._local_proxy:
+            try:
+                self._local_proxy.stop()
+            finally:
+                self._local_proxy = None
 
     def __enter__(self):
         import traceback
@@ -375,15 +399,25 @@ class BrowserClient:
         except BaseException as e:
             print(f"[BrowserClient] Chrome launch FAILED ({type(e).__name__}): {e}")
             traceback.print_exc()
+            # __exit__ is not called for a context manager whose __enter__
+            # raised, so release the proxy here or it leaks per retry cycle.
+            self._release_proxy()
             raise
+        self._entered = True
         print("[BrowserClient] Chrome launched successfully.")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         print("[BrowserClient] __exit__ — closing browser...")
-        self._sb_ctx.__exit__(exc_type, exc_val, exc_tb)
-        if self._local_proxy:
-            self._local_proxy.stop()
+        try:
+            # Guards the close_browser() path in slot_check_service, which can
+            # call __exit__ on a client whose __enter__ failed or never ran —
+            # SB.__exit__ on an un-entered context raises.
+            if self._entered and self._sb_ctx is not None:
+                self._sb_ctx.__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._entered = False
+            self._release_proxy()
         print("[BrowserClient] Browser closed.")
 
     def switch_country(self, new_country: str) -> None:

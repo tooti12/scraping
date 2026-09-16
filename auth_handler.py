@@ -89,7 +89,6 @@ class AuthHandler:
             return auth_token
         except Exception as e:
             print(f"[AuthHandler] Exception reading JWT: {e}")
-            self.browser.sb.sleep(200)
             return None
 
     def _type_credentials(self):
