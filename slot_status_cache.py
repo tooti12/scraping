@@ -311,8 +311,16 @@ def _run_one_cycle() -> None:
             return
         code = pending.pop(0)
         _ensure_worker(code)
+        # _ensure_worker releases _workers_lock before returning, so a
+        # concurrent stop() (_stop_all_workers clears _workers from the Flask
+        # request thread) can wipe the entry in between. Read the handle back
+        # under the lock and skip if it's gone — a KeyError here would escape
+        # _run_one_cycle and kill the whole loop thread.
         with _workers_lock:
-            _workers[code]["command_queue"].put("check")
+            w = _workers.get(code)
+        if w is None:
+            return
+        w["command_queue"].put("check")
         busy[code] = time.monotonic()
 
     for _ in range(min(MAX_CONCURRENT_COUNTRIES, len(pending))):
@@ -359,7 +367,7 @@ def _run_one_cycle() -> None:
 
 
 def _run_loop():
-    global _first_cycle_done, _is_checking, _next_cycle_at
+    global _started, _first_cycle_done, _is_checking, _next_cycle_at
     while not _stop_event.is_set():
         with _started_lock:
             _is_checking = True
